@@ -161,7 +161,7 @@ end
 scrub_win(vim.api.nvim_get_current_win())
 vim.cmd("normal! G")
 
-local HINTS = "v/V/mouse + a or ⏎ annotate · Tab switch · q/:qa quit&send · :Cancel discard"
+local HINTS = "a annotate line · v/V/mouse + a/⏎ selection · Tab switch · q/:qa quit&send · :Cancel discard"
 
 local function thread_win()
   return vim.fn.bufwinid(thread)
@@ -228,9 +228,7 @@ local function ensure_reply()
   return win
 end
 
-local function annotate()
-  local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), { type = vim.fn.mode() })
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
+local function annotate_lines(lines)
   if #lines == 0 then
     return
   end
@@ -251,6 +249,16 @@ local function annotate()
   vim.api.nvim_set_current_win(win)
   vim.api.nvim_win_set_cursor(win, { #content, 0 })
   vim.cmd("startinsert")
+end
+
+local function annotate_selection()
+  local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), { type = vim.fn.mode() })
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
+  annotate_lines(lines)
+end
+
+local function annotate_line()
+  annotate_lines({ vim.api.nvim_get_current_line() })
 end
 
 local function flush()
@@ -290,10 +298,16 @@ local function unshadow(mode, lhs)
   end
 end
 
-vim.keymap.set("x", "a", annotate, { buffer = thread })
-vim.keymap.set("x", "<CR>", annotate, { buffer = thread })
-unshadow("x", "a")
-unshadow("x", "<CR>")
+local function unshadow_triggers()
+  unshadow("x", "a")
+  unshadow("x", "<CR>")
+  unshadow("n", "a")
+end
+
+vim.keymap.set("x", "a", annotate_selection, { buffer = thread })
+vim.keymap.set("x", "<CR>", annotate_selection, { buffer = thread })
+vim.keymap.set("n", "a", annotate_line, { buffer = thread })
+unshadow_triggers()
 vim.keymap.set("n", "q", "<Cmd>qa<CR>", { buffer = thread })
 vim.keymap.set("n", "<Tab>", function()
   vim.api.nvim_set_current_win(ensure_reply())
@@ -305,8 +319,7 @@ hide_chrome()
 vim.defer_fn(function()
   hide_chrome()
   prewarm_markdown()
-  unshadow("x", "a")
-  unshadow("x", "<CR>")
+  unshadow_triggers()
   local tw = thread_win()
   if tw ~= -1 then
     scrub_win(tw)
@@ -319,7 +332,6 @@ end, 200)
 
 vim.defer_fn(function()
   hide_chrome()
-  unshadow("x", "a")
-  unshadow("x", "<CR>")
+  unshadow_triggers()
   scrub_win(thread_win())
 end, 1500)

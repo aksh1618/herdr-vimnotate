@@ -196,17 +196,27 @@ vim.api.nvim_create_autocmd("OptionSet", {
   end,
 })
 
+local function prepare_reply_buf()
+  if reply_buf and vim.api.nvim_buf_is_valid(reply_buf) then
+    return reply_buf
+  end
+  reply_buf = vim.fn.bufadd(reply_path)
+  vim.fn.bufload(reply_buf)
+  vim.bo[reply_buf].swapfile = false
+  vim.bo[reply_buf].buflisted = false
+  vim.bo[reply_buf].filetype = "markdown"
+  return reply_buf
+end
+
 local function ensure_reply()
   local win = reply_win()
   if win ~= -1 then
     return win
   end
   local cur = vim.api.nvim_get_current_win()
-  vim.cmd("topleft 10split " .. vim.fn.fnameescape(reply_path))
-  reply_buf = vim.api.nvim_get_current_buf()
-  vim.bo[reply_buf].filetype = "markdown"
-  vim.bo[reply_buf].swapfile = false
+  vim.cmd("topleft sbuffer " .. prepare_reply_buf())
   win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_height(win, 10)
   vim.wo[win].winbar = "REPLY · " .. HINTS
   vim.keymap.set("n", "<Tab>", function()
     local tw = thread_win()
@@ -266,8 +276,25 @@ vim.api.nvim_create_user_command("Send", function()
   vim.cmd("qa!")
 end, { range = true })
 
+local function unshadow(mode, lhs)
+  local prefix = vim.api.nvim_replace_termcodes(lhs, true, false, true)
+  local umbrella = mode == "x" and "v" or mode
+  for _, m in ipairs(vim.fn.maplist()) do
+    local applies = m.buffer == 0
+      and (m.mode == " " or m.mode:find(mode, 1, true) or m.mode:find(umbrella, 1, true))
+    if applies then
+      local other = m.lhsraw or vim.api.nvim_replace_termcodes(m.lhs, true, false, true)
+      if #other > #prefix and other:sub(1, #prefix) == prefix then
+        pcall(vim.keymap.del, mode, m.lhs)
+      end
+    end
+  end
+end
+
 vim.keymap.set("x", "a", annotate, { buffer = thread })
 vim.keymap.set("x", "<CR>", annotate, { buffer = thread })
+unshadow("x", "a")
+unshadow("x", "<CR>")
 vim.keymap.set("n", "q", "<Cmd>qa<CR>", { buffer = thread })
 vim.keymap.set("n", "<Tab>", function()
   vim.api.nvim_set_current_win(ensure_reply())
@@ -278,6 +305,9 @@ hide_chrome()
 
 vim.defer_fn(function()
   hide_chrome()
+  prepare_reply_buf()
+  unshadow("x", "a")
+  unshadow("x", "<CR>")
   local tw = thread_win()
   if tw ~= -1 then
     scrub_win(tw)
@@ -290,5 +320,7 @@ end, 200)
 
 vim.defer_fn(function()
   hide_chrome()
+  unshadow("x", "a")
+  unshadow("x", "<CR>")
   scrub_win(thread_win())
 end, 1500)

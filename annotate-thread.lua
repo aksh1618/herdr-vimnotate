@@ -196,16 +196,13 @@ vim.api.nvim_create_autocmd("OptionSet", {
   end,
 })
 
-local function prepare_reply_buf()
-  if reply_buf and vim.api.nvim_buf_is_valid(reply_buf) then
-    return reply_buf
-  end
-  reply_buf = vim.fn.bufadd(reply_path)
-  vim.fn.bufload(reply_buf)
-  vim.bo[reply_buf].swapfile = false
-  vim.bo[reply_buf].buflisted = false
-  vim.bo[reply_buf].filetype = "markdown"
-  return reply_buf
+local function prewarm_markdown()
+  local buf = vim.fn.bufadd(vim.fn.fnamemodify(reply_path, ":h") .. "/.warmup.md")
+  vim.fn.bufload(buf)
+  vim.api.nvim_buf_call(buf, function()
+    vim.bo[buf].filetype = "markdown"
+  end)
+  vim.api.nvim_buf_delete(buf, { force = true })
 end
 
 local function ensure_reply()
@@ -214,9 +211,11 @@ local function ensure_reply()
     return win
   end
   local cur = vim.api.nvim_get_current_win()
-  vim.cmd("topleft sbuffer " .. prepare_reply_buf())
+  vim.cmd("topleft 10split " .. vim.fn.fnameescape(reply_path))
+  reply_buf = vim.api.nvim_get_current_buf()
+  vim.bo[reply_buf].filetype = "markdown"
+  vim.bo[reply_buf].swapfile = false
   win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_height(win, 10)
   vim.wo[win].winbar = "REPLY · " .. HINTS
   vim.keymap.set("n", "<Tab>", function()
     local tw = thread_win()
@@ -305,7 +304,7 @@ hide_chrome()
 
 vim.defer_fn(function()
   hide_chrome()
-  prepare_reply_buf()
+  prewarm_markdown()
   unshadow("x", "a")
   unshadow("x", "<CR>")
   local tw = thread_win()

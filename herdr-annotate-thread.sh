@@ -15,6 +15,7 @@ restore() {
     "$herdr" pane move "$pane" --tab "$tab" --target-pane "$me" --split down --focus >/dev/null 2>&1 \
       || "$herdr" pane move "$pane" --tab "$tab" --split down --focus >/dev/null 2>&1 || true
   fi
+  "$herdr" pane resize --pane "$pane" --direction right --amount 0 >/dev/null 2>&1 || true
 }
 cleanup() {
   restore

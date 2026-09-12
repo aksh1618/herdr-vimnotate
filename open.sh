@@ -21,3 +21,4 @@ new="$(printf '%s' "$resp" | jq -r '.result.plugin_pane.pane.pane_id // empty')"
 [ -n "$new" ] || { rm -rf "$dir"; exit 1; }
 "$herdr" pane move "$new" --tab "$tab" --target-pane "$pane" --split down --focus >/dev/null
 "$herdr" pane move "$pane" --new-tab --workspace "$workspace" --no-focus --label "annotate · parked" >/dev/null
+"$herdr" pane resize --pane "$new" --direction right --amount 0 >/dev/null 2>&1 || true

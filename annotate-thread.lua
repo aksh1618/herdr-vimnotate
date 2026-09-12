@@ -148,8 +148,9 @@ local function scrub_win(win)
   if win == -1 then
     return
   end
-  vim.wo[win].wrap = false
-  vim.wo[win].linebreak = true
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = false
+  vim.wo[win].breakindent = false
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
@@ -315,6 +316,18 @@ end, { buffer = thread })
 
 vim.wo.winbar = "THREAD · " .. HINTS
 hide_chrome()
+
+local selected_path = vim.env.ANNOTATE_SELECTED
+if selected_path and selected_path ~= "" then
+  local sf = io.open(selected_path, "rb")
+  if sf then
+    local selected = sf:read("*a"):gsub("%s+$", "")
+    sf:close()
+    if selected ~= "" then
+      annotate_lines(vim.split(selected, "\n", { plain = true }))
+    end
+  end
+end
 
 vim.defer_fn(function()
   hide_chrome()

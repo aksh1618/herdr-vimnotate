@@ -10,7 +10,6 @@ tab="$(printf '%s' "$info" | jq -r '.result.pane.tab_id')"
 workspace="$(printf '%s' "$info" | jq -r '.result.pane.workspace_id')"
 lines="${ANNOTATE_LINES:-1000}"
 dir="$(mktemp -d "${TMPDIR:-/tmp}/herdr-annotate.XXXXXX")"
-printf '%s' "$info" | jq -r '.result.pane.scroll.viewport_rows // 0' >"$dir/rows"
 "$herdr" pane read "$pane" --source visible --format ansi >"$dir/visible.ansi" 2>/dev/null || true
 "$herdr" pane read "$pane" --source recent-unwrapped --format ansi --lines "$lines" >"$dir/thread.ansi" 2>/dev/null \
   || "$herdr" pane read "$pane" --source recent --format ansi --lines "$lines" >"$dir/thread.ansi"
@@ -21,4 +20,3 @@ new="$(printf '%s' "$resp" | jq -r '.result.plugin_pane.pane.pane_id // empty')"
 [ -n "$new" ] || { rm -rf "$dir"; exit 1; }
 "$herdr" pane move "$new" --tab "$tab" --target-pane "$pane" --split down --focus >/dev/null
 "$herdr" pane move "$pane" --new-tab --workspace "$workspace" --no-focus --label "annotate · parked" >/dev/null
-"$herdr" pane resize --pane "$new" --direction right --amount 0 >/dev/null 2>&1 || true

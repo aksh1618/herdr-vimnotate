@@ -22,17 +22,21 @@ cleanup() {
   rm -rf "$dir"
 }
 trap cleanup EXIT HUP TERM INT
-rows="$(cat "$dir/rows" 2>/dev/null || echo 0)"
 for _ in $(seq 1 60); do
   [ "$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.tab_id // empty')" != "$tab" ] && break
   sleep 0.05
 done
-for _ in $(seq 1 20); do
-  [ -z "$me" ] && break
-  [ "$("$herdr" pane get "$me" 2>/dev/null | jq -r '.result.pane.scroll.viewport_rows // 0')" = "$rows" ] && break
-  sleep 0.05
+printf '\033[?1049h\033[?25l'
+before="$(stty size 2>/dev/null || true)"
+for _ in 1 2; do
+  [ -n "$me" ] || break
+  "$herdr" pane resize --pane "$me" --direction right --amount 0 >/dev/null 2>&1 || true
+  for _ in $(seq 1 8); do
+    [ "$(stty size 2>/dev/null || true)" != "$before" ] && break 2
+    sleep 0.025
+  done
 done
-printf '\033[?25l'
+printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
 ANNOTATE_RAW="$dir/thread.ansi" ANNOTATE_SELECTED="$dir/selected.txt" ANNOTATE_REPLY="$reply" nvim -c "luafile $script_dir/annotate-thread.lua"
 printf '\033[2J\033[H'

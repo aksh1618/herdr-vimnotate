@@ -1,5 +1,5 @@
-local raw_path = vim.env.ANNOTATE_RAW
-local reply_path = vim.env.ANNOTATE_REPLY
+local raw_path = vim.env.VIMNOTATE_RAW
+local reply_path = vim.env.VIMNOTATE_REPLY
 
 local cancelled = false
 local reply_buf = nil
@@ -87,7 +87,7 @@ local function hl_for(attrs)
     attrs.underline and "u" or "",
   }, "_")
   if not hl_cache[key] then
-    local name = "AnnThread" .. key:gsub("[^%w]", "x")
+    local name = "Vimnotate" .. key:gsub("[^%w]", "x")
     vim.api.nvim_set_hl(0, name, {
       fg = color_val(attrs.fg),
       bg = color_val(attrs.bg),
@@ -136,7 +136,7 @@ end
 local thread = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_set_current_buf(thread)
 vim.api.nvim_buf_set_lines(thread, 0, -1, false, text_lines)
-local ns = vim.api.nvim_create_namespace("annotate_thread")
+local ns = vim.api.nvim_create_namespace("vimnotate")
 for row, spans in ipairs(line_spans) do
   for _, sp in ipairs(spans) do
     vim.api.nvim_buf_set_extmark(thread, ns, row - 1, sp[1], { end_col = sp[2], hl_group = sp[3] })
@@ -317,7 +317,7 @@ end, { buffer = thread })
 vim.wo.winbar = "THREAD · " .. HINTS
 hide_chrome()
 
-local selected_path = vim.env.ANNOTATE_SELECTED
+local selected_path = vim.env.VIMNOTATE_SELECTED
 if selected_path and selected_path ~= "" then
   local sf = io.open(selected_path, "rb")
   if sf then

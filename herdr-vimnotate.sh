@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 herdr="${HERDR_BIN_PATH:-herdr}"
-dir="${ANNOTATE_DIR:?}"
-pane="${ANNOTATE_TARGET_PANE:?}"
-tab="${ANNOTATE_TAB:?}"
+dir="${VIMNOTATE_DIR:?}"
+pane="${VIMNOTATE_TARGET_PANE:?}"
+tab="${VIMNOTATE_TAB:?}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 reply="$dir/reply.md"
@@ -38,7 +38,7 @@ for _ in 1 2; do
 done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
-ANNOTATE_RAW="$dir/thread.ansi" ANNOTATE_SELECTED="$dir/selected.txt" ANNOTATE_REPLY="$reply" nvim -c "luafile $script_dir/annotate-thread.lua"
+VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" nvim -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
 restore
 [ -f "$reply" ] || exit 0
@@ -55,12 +55,12 @@ clip() {
   fi
 }
 agent="$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.agent // empty')"
-if [ -z "${ANNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$reply")" -gt 1 ]; then
+if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$reply")" -gt 1 ]; then
   clip <"$reply" || true
   "$herdr" notification show "Annotations copied to clipboard" --body "pane $pane has no agent; multi-line reply not auto-sent" --sound none || true
   exit 0
 fi
-resp="$(jq -Rsc --arg pane "$pane" '{id:"annotate",method:"pane.send_input",params:{pane_id:$pane,text:(.|rtrimstr("\n")),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
+resp="$(jq -Rsc --arg pane "$pane" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(.|rtrimstr("\n")),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
 if ! printf '%s' "$resp" | grep -q '"type":"ok"'; then
   clip <"$reply" || true
   "$herdr" notification show "Annotation send failed — copied to clipboard" --body "$resp" --sound none || true

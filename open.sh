@@ -9,12 +9,16 @@ info="$("$herdr" pane get "$pane")"
 tab="$(printf '%s' "$info" | jq -r '.result.pane.tab_id')"
 workspace="$(printf '%s' "$info" | jq -r '.result.pane.workspace_id')"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate"
+server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256sum | cut -c1-12)"
 if [ -d "$state_dir" ]; then
-  find "$state_dir" -maxdepth 1 -name '*.json' -mtime +7 -delete 2>/dev/null || true
-  for f in "$state_dir"/*.json; do
+  find "$state_dir" -maxdepth 1 -name '*.json' -mmin +10080 -delete 2>/dev/null || true
+  find "$state_dir" -maxdepth 1 -name '*.json.tmp*' -mmin +60 -delete 2>/dev/null || true
+  for f in "$state_dir/$server"-*.json; do
     [ -e "$f" ] || continue
-    owner="$(jq -r '.pane // empty' "$f" 2>/dev/null || true)"
-    if [ -n "$owner" ] && ! "$herdr" pane get "$owner" >/dev/null 2>&1; then
+    owner="$(jq -r --arg s "$server" 'select(.server == $s) | .pane // empty' "$f" 2>/dev/null || true)"
+    [ -n "$owner" ] || continue
+    got="$("$herdr" pane get "$owner" 2>&1 >/dev/null || true)"
+    if printf '%s' "$got" | jq -e '.error.code == "pane_not_found"' >/dev/null 2>&1; then
       rm -f "$f"
     fi
   done

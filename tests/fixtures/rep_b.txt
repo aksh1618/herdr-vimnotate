@@ -1,0 +1,17 @@
+> start over
+⏺ Read 1 file
+
+Something else.
+
+> fix the build
+⏺ Read 1 file
+
+The config looks fine.
+
+⏺ Read 1 file
+
+Now the tests.
+
+⏺ Read 1 file
+
+Done.

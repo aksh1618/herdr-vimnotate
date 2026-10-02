@@ -1,0 +1,39 @@
+general note
+
+> line one
+> line two
+
+first comment
+
+\> quoted-looking line
+  \>> nested
+
+> three
+
+Looks good.
+
+> line four
+
+Looks good.
+nice
+really
+
+> line five
+
+Remove this.
+
+> line six
+
+Remove this. too long
+
+> line seven
+
+Remove this.
+a
+b
+
+> line seven
+>
+> last words here
+
+multi

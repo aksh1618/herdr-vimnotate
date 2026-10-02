@@ -20,7 +20,7 @@ check() {
 
 vn() {
   local cap="$1" state="$2" name="$3"
-  rm -f "$work/reply.md"
+  rm -f "$work/reply.md" "$work/note.md"
   VIMNOTATE_RAW="$fx/$cap" VIMNOTATE_STATE="$state" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_SERVER="${SERVER:-srvA}" \
     VIMNOTATE_REPLY="$work/reply.md" VIMNOTATE_SELECTED="${SELECTED:-/dev/null}" VIMNOTATE_TEST_OUT="$out" \
     timeout 20 nvim --clean --headless -i NONE --cmd "${PRE:-}" -c "luafile $plugin/vimnotate.lua" -c "luafile $here/lib.lua" \
@@ -72,6 +72,22 @@ vn ops.txt "" compose_highlight
 SELECTED="$fx/sel.txt" vn ops.txt "" anchor_highlight
 vn ops.txt "" hover_sent
 vn ops.txt "" no_repeat_provider
+vn ops.txt "" note_toggle
+check '[ "$(cat "$work/reply.md")" = "$(printf "line one\nline two!\n\n> line five\n\nLooks good.")" ]' "note sent first, with the popup open"
+vn ops.txt "" note_empty
+check '[ "$(head -c 1 "$work/reply.md")" = ">" ]' "blank note sends nothing"
+vn ops.txt "" note_none
+check '[ ! -e "$work/reply.md" ]' "empty note and no annotations write no reply"
+SELECTED="$fx/missing.txt" vn ops.txt "" note_fallback
+check '[ "$(cat "$work/reply.md")" = "$(printf "> not in the thread\n> second line\n\nreply here")" ]' "copy-mode fallback note is sent"
+vn ops.txt "" note_cancel
+check '[ ! -e "$work/reply.md" ]' ":Cancel discards the note"
+vn ops.txt "" note_layout
+vn ops.txt "" note_focus
+vn ops.txt "" popup_undo
+mkdir -p "$work/undo"
+PRE="set undofile undodir=$work/undo" vn ops.txt "" no_undofile
+check '[ -s "$work/reply.md" ] && [ -z "$(ls -A "$work/undo")" ]' "no undo file written"
 PRE="set rtp+=$fx/provider | lua local r = require('nvim-treesitter-textobjects.repeatable_move') vim.keymap.set('n', ';', r.repeat_last_move_next) vim.keymap.set('n', ',', r.repeat_last_move_previous) vim.keymap.set('n', 'f', r.builtin_f_expr, { expr = true })" vn ops.txt "" repeat_provider
 
 hk="$work/hk"

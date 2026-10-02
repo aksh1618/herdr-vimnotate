@@ -8,8 +8,10 @@ package.loaded["vimnotate"] = M
 
 local cancelled = false
 local note_buf = nil
+local note_win = nil
 
 vim.o.swapfile = false
+vim.o.undofile = false
 vim.o.mouse = "a"
 vim.o.laststatus = 0
 vim.o.autowriteall = true
@@ -175,11 +177,15 @@ local function thread_win()
 end
 M.thread_win = thread_win
 
-local function note_win()
+local function note_text()
   if note_buf and vim.api.nvim_buf_is_valid(note_buf) then
-    return vim.fn.bufwinid(note_buf)
+    return vim.trim(table.concat(vim.api.nvim_buf_get_lines(note_buf, 0, -1, false), "\n"))
   end
-  return -1
+  return ""
+end
+
+local function note_shown()
+  return note_win ~= nil and vim.api.nvim_win_is_valid(note_win)
 end
 
 local function warn(msg)
@@ -585,7 +591,6 @@ local function refresh_loclist()
 end
 
 local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x drop · R toggle view · Tab note · q send"
-local NOTE_HINTS = "general note, sent above the annotations · Tab thread · :qa send · :Cancel discard"
 
 local function thread_winbar()
   local counts, sent = {}, 0
@@ -604,6 +609,9 @@ local function thread_winbar()
   end
   if sent > 0 then
     tally[#tally + 1] = sent .. " sent"
+  end
+  if note_text() ~= "" then
+    tally[#tally + 1] = "✎ note"
   end
   local head = #tally > 0 and ("THREAD " .. table.concat(tally, " ")) or "THREAD"
   if view.flash then
@@ -707,59 +715,6 @@ vim.api.nvim_create_autocmd("User", {
     end)
   end,
 })
-
-local function ensure_note()
-  local win = note_win()
-  if win ~= -1 then
-    return win
-  end
-  local cur = vim.api.nvim_get_current_win()
-  vim.cmd("topleft 10split")
-  vim.wo.winfixbuf = false
-  vim.wo.conceallevel = 2
-  vim.cmd("edit " .. vim.fn.fnameescape(note_path))
-  note_buf = vim.api.nvim_get_current_buf()
-  markdown_warm = true
-  vim.bo[note_buf].filetype = "markdown"
-  vim.bo[note_buf].swapfile = false
-  win = vim.api.nvim_get_current_win()
-  vim.wo[win].winbar = "NOTE · %<" .. NOTE_HINTS
-  vim.keymap.set("n", "<Tab>", function()
-    local tw = thread_win()
-    if tw ~= -1 then
-      vim.api.nvim_set_current_win(tw)
-    end
-  end, { buffer = note_buf })
-  vim.keymap.set("n", "H", "H", { buffer = note_buf })
-  vim.keymap.set("n", "L", "L", { buffer = note_buf })
-  hide_chrome()
-  vim.api.nvim_set_current_win(cur)
-  return win
-end
-M.ensure_note = ensure_note
-
-local function quote_into_note(lines)
-  if #lines == 0 then
-    return
-  end
-  local win = ensure_note()
-  local content = vim.api.nvim_buf_get_lines(note_buf, 0, -1, false)
-  while #content > 0 and content[#content]:match("^%s*$") do
-    table.remove(content)
-  end
-  if #content > 0 then
-    content[#content + 1] = ""
-  end
-  for _, l in ipairs(lines) do
-    content[#content + 1] = ("> " .. l):gsub("%s+$", "")
-  end
-  content[#content + 1] = ""
-  content[#content + 1] = ""
-  vim.api.nvim_buf_set_lines(note_buf, 0, -1, false, content)
-  vim.api.nvim_set_current_win(win)
-  vim.api.nvim_win_set_cursor(win, { #content, 0 })
-  vim.cmd("startinsert")
-end
 
 local pending_ns = vim.api.nvim_create_namespace("vimnotate.pending")
 local COMPOSE_MIN_WIDTH = 48
@@ -2357,6 +2312,193 @@ M.rail_scrub = function()
   end
 end
 
+local NOTE_MIN_WIDTH = 40
+local NOTE_MAX_WIDTH = 100
+local NOTE_MIN_HEIGHT = 6
+local NOTE_MAX_HEIGHT = 24
+local NOTE_FOOTER = " sent above the annotations "
+
+local function note_title()
+  if note_shown() and vim.api.nvim_get_current_win() == note_win and vim.api.nvim_get_mode().mode:sub(1, 1) == "i" then
+    return " note · esc normal "
+  end
+  return " note · q/Tab close · i insert "
+end
+
+local function clamp(v, lo, hi)
+  return math.max(lo, math.min(hi, v))
+end
+
+local function note_layout()
+  local cols, rows = vim.o.columns, vim.o.lines - vim.o.cmdheight
+  local width = math.max(1, math.min(cols - 2, clamp(math.floor(cols * 0.7), NOTE_MIN_WIDTH, NOTE_MAX_WIDTH)))
+  local height = math.max(1, math.min(rows - 2, clamp(math.floor(rows * 0.45), NOTE_MIN_HEIGHT, NOTE_MAX_HEIGHT)))
+  return {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = math.max(0, math.floor((rows - height - 2) / 2)),
+    col = math.max(0, math.floor((cols - width - 2) / 2)),
+    title = truncate(note_title(), width),
+    title_pos = "left",
+    footer = truncate(NOTE_FOOTER, width),
+    footer_pos = "right",
+  }
+end
+M.note_layout = note_layout
+
+function M.note_shown()
+  return note_shown()
+end
+
+function M.note_hide()
+  if not note_shown() then
+    return
+  end
+  local win = note_win
+  if vim.api.nvim_get_current_win() == win then
+    back_to_thread()
+  end
+  if vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_close(win, true)
+  end
+  if vim.api.nvim_get_mode().mode:sub(1, 1) == "i" then
+    vim.cmd("stopinsert")
+  end
+  refresh_winbar()
+end
+
+local function note_keys(buf)
+  local o = { buffer = buf, nowait = true }
+  vim.keymap.set("n", "q", M.note_hide, o)
+  vim.keymap.set("n", "<Tab>", M.note_hide, o)
+  vim.keymap.set("n", "H", "H", o)
+  vim.keymap.set("n", "L", "L", o)
+  for _, lhs in ipairs(M.BUFFER_SWITCHERS) do
+    vim.keymap.set("n", lhs, "<Nop>", o)
+  end
+end
+
+function M.note_open()
+  if note_shown() then
+    vim.api.nvim_set_current_win(note_win)
+    return note_win
+  end
+  bars_hide()
+  local fresh = not (note_buf and vim.api.nvim_buf_is_valid(note_buf))
+  local buf = note_buf
+  if fresh then
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "wipe"
+  end
+  local cfg = note_layout()
+  cfg.border = "rounded"
+  cfg.style = "minimal"
+  local win = vim.api.nvim_open_win(buf, false, cfg)
+  note_win = win
+  vim.wo[win].winfixbuf = false
+  vim.wo[win].conceallevel = 2
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].winhighlight = "FloatBorder:VimnotateCommentBorder,FloatTitle:VimnotateTitle,FloatFooter:VimnotateTitle"
+  vim.api.nvim_set_current_win(win)
+  if fresh then
+    vim.cmd("edit " .. vim.fn.fnameescape(note_path))
+    note_buf = vim.api.nvim_get_current_buf()
+    markdown_warm = true
+    if vim.bo[note_buf].filetype ~= "markdown" then
+      vim.bo[note_buf].filetype = "markdown"
+    end
+    vim.bo[note_buf].swapfile = false
+    vim.bo[note_buf].undofile = false
+    vim.bo[note_buf].bufhidden = "hide"
+    note_keys(note_buf)
+    hide_chrome()
+  end
+  vim.wo[win].winfixbuf = true
+  return win
+end
+
+function M.note_toggle()
+  if note_shown() then
+    M.note_hide()
+    return
+  end
+  local win = M.note_open()
+  local lines = vim.api.nvim_buf_get_lines(note_buf, 0, -1, false)
+  local last = #lines
+  while last > 1 and not lines[last]:find("%S") do
+    last = last - 1
+  end
+  vim.api.nvim_win_set_cursor(win, { last, math.max(#lines[last] - 1, 0) })
+  if note_text() == "" then
+    vim.cmd("startinsert!")
+  end
+end
+
+local function quote_into_note(lines)
+  if #lines == 0 then
+    return
+  end
+  local win = M.note_open()
+  local content = vim.api.nvim_buf_get_lines(note_buf, 0, -1, false)
+  while #content > 0 and content[#content]:match("^%s*$") do
+    table.remove(content)
+  end
+  if #content > 0 then
+    content[#content + 1] = ""
+  end
+  for _, l in ipairs(lines) do
+    content[#content + 1] = ("> " .. l):gsub("%s+$", "")
+  end
+  content[#content + 1] = ""
+  content[#content + 1] = ""
+  vim.api.nvim_buf_set_lines(note_buf, 0, -1, false, content)
+  vim.api.nvim_win_set_cursor(win, { #content, 0 })
+  vim.cmd("startinsert")
+end
+
+local note_group = vim.api.nvim_create_augroup("vimnotate.note", { clear = true })
+vim.api.nvim_create_autocmd("WinLeave", {
+  group = note_group,
+  callback = function()
+    if not note_shown() or vim.api.nvim_get_current_win() ~= note_win then
+      return
+    end
+    vim.schedule(function()
+      local cur = vim.api.nvim_get_current_win()
+      if note_shown() and cur ~= note_win and vim.api.nvim_win_get_config(cur).relative == "" then
+        M.note_hide()
+      end
+    end)
+  end,
+})
+vim.api.nvim_create_autocmd("ModeChanged", {
+  group = note_group,
+  callback = function()
+    if note_shown() then
+      vim.api.nvim_win_set_config(note_win, { title = truncate(note_title(), vim.api.nvim_win_get_width(note_win)), title_pos = "left" })
+    end
+  end,
+})
+vim.api.nvim_create_autocmd("VimResized", {
+  group = note_group,
+  callback = function()
+    if note_shown() then
+      vim.api.nvim_win_set_config(note_win, note_layout())
+    end
+  end,
+})
+vim.api.nvim_create_autocmd("WinClosed", {
+  group = note_group,
+  callback = function(ev)
+    if note_win and tonumber(ev.match) == note_win then
+      note_win = nil
+      vim.schedule(refresh_winbar)
+    end
+  end,
+})
+
 local function quote_lines(lines)
   local out = {}
   for i, l in ipairs(lines) do
@@ -2371,11 +2513,9 @@ end
 
 function M.export()
   local parts = {}
-  if note_buf and vim.api.nvim_buf_is_valid(note_buf) then
-    local note = vim.trim(table.concat(vim.api.nvim_buf_get_lines(note_buf, 0, -1, false), "\n"))
-    if note ~= "" then
-      parts[#parts + 1] = note
-    end
+  local note = note_text()
+  if note ~= "" then
+    parts[#parts + 1] = note
   end
   local items = vim.tbl_filter(function(item)
     return not item.sent
@@ -2628,9 +2768,7 @@ end
 vim.keymap.set("n", "e", M.edit, bo)
 vim.keymap.set("n", "x", M.remove_at_cursor, bo)
 vim.keymap.set("n", "q", "<Cmd>qa<CR>", bo)
-vim.keymap.set("n", "<Tab>", function()
-  vim.api.nvim_set_current_win(ensure_note())
-end, bo)
+vim.keymap.set("n", "<Tab>", M.note_toggle, bo)
 vim.keymap.set("n", "<S-Tab>", M.rail_focus, bo)
 vim.keymap.set("n", "R", M.cycle_view, bo)
 vim.keymap.set("n", "H", "H", bo)

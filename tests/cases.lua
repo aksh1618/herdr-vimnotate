@@ -168,7 +168,7 @@ function C.rekind(V, A)
 end
 
 function C.format(V)
-  local win = V.ensure_note()
+  local win = V.note_open()
   vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(win), 0, -1, false, { "", "general note", "" })
   local A = V.annotations
   A.add({ srow = 0, scol = 0, erow = 1, ecol = 0, linewise = true, kind = "comment", body = "first comment\n\n> quoted-looking line\n  >> nested" })
@@ -379,6 +379,151 @@ function C.repeat_provider(V, A)
   T.keys("fe;")
   T.eq(vim.api.nvim_win_get_cursor(0), { 3, 8 }, "; repeats f after ]a")
   T.finish("Cancel")
+end
+
+local function note_lines()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(b):match("/note%.md$") then
+      return vim.api.nvim_buf_get_lines(b, 0, -1, false)
+    end
+  end
+  return nil
+end
+
+local function settle()
+  vim.wait(30, function()
+    return false
+  end)
+end
+
+local function layout()
+  local out = {}
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_config(w).relative == "" then
+      out[#out + 1] = { w, vim.api.nvim_win_get_width(w), vim.api.nvim_win_get_height(w) }
+    end
+  end
+  return out
+end
+
+local function title_of(cfg)
+  local t = ""
+  for _, chunk in ipairs(cfg.title or {}) do
+    t = t .. chunk[1]
+  end
+  return t
+end
+
+function C.note_toggle(V, A)
+  T.cursor(0)
+  T.keys("<Tab>line one<CR>line two<Esc>")
+  T.ok(V.note_shown(), "Tab opens the note in insert mode")
+  local cfg = vim.api.nvim_win_get_config(0)
+  T.eq({ cfg.relative, cfg.border[1] }, { "editor", "╭" }, "note is a floating popup with a rounded border")
+  T.ok(vim.wo.winhighlight:find("FloatBorder:VimnotateCommentBorder", 1, true) ~= nil, "border uses the comment accent")
+  T.eq(note_lines(), { "line one", "line two" }, "insert Enter is a newline")
+  T.keys("q")
+  T.eq({ V.note_shown(), vim.api.nvim_get_current_win() == V.thread_win() }, { false, true }, "q hides and returns to the thread")
+  T.ok(vim.wo[V.thread_win()].winbar:find("✎ note", 1, true) ~= nil, "winbar marks a non-empty note")
+  T.keys("<Tab>")
+  T.eq({ V.note_shown(), vim.fn.mode(), vim.api.nvim_win_get_cursor(0) }, { true, "n", { 2, 7 } }, "a non-empty note opens in normal mode at the end")
+  T.keys("a!<Esc><Tab>")
+  T.eq({ V.note_shown(), note_lines() }, { false, { "line one", "line two!" } }, "Tab hides and keeps the content")
+  T.keys("<Tab>")
+  T.add(4, "good")
+  T.finish()
+end
+
+function C.note_empty(V)
+  T.cursor(0)
+  T.keys("<Tab>   <CR><CR><Esc>q")
+  T.ok(vim.wo[V.thread_win()].winbar:find("✎", 1, true) == nil, "blank note is not marked")
+  T.eq(V.export(), "", "blank note exports nothing")
+  T.add(1, "delete")
+  T.eq(V.export(), "> line two\n\nRemove this.", "blank note adds no leading block")
+  T.finish()
+end
+
+function C.note_none()
+  T.cursor(0)
+  T.keys("<Tab><Esc>q")
+  T.finish()
+end
+
+function C.note_fallback(V)
+  T.eq(note_lines(), { "> not in the thread", "> second line", "", "" }, "unfound selection is quoted into the note")
+  T.eq({ V.note_shown(), vim.api.nvim_get_current_win() ~= V.thread_win(), vim.api.nvim_win_get_cursor(0)[1] }, { true, true, 4 }, "note popup open below the quote")
+  T.keys("ireply here<Esc>")
+  T.finish()
+end
+
+function C.note_cancel()
+  T.cursor(0)
+  T.keys("<Tab>keep me<Esc>q")
+  T.add(2, "good")
+  T.finish("Cancel")
+end
+
+function C.note_layout(V, A)
+  vim.g.vimnotate_view = "rail"
+  vim.o.columns = 160
+  vim.o.lines = 50
+  T.add(2, "good")
+  T.add(6, "comment", "hm")
+  settle()
+  local before = layout()
+  T.eq(#before, 2, "rail is open")
+  T.cursor(0)
+  T.keys("<Tab>")
+  local cfg = vim.api.nvim_win_get_config(0)
+  T.eq({ cfg.width, cfg.height, cfg.row, cfg.col }, { 100, 22, 12, 29 }, "160x50: centred, width capped")
+  T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title fits: " .. title_of(cfg))
+  T.eq(layout(), before, "thread and rail keep their size with the note open")
+  vim.o.columns = 80
+  vim.o.lines = 24
+  settle()
+  cfg = vim.api.nvim_win_get_config(0)
+  T.eq({ cfg.width, cfg.height, cfg.row, cfg.col }, { 56, 10, 5, 11 }, "80x24: recomputed on resize")
+  T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title fits at 80 columns")
+  vim.o.columns = 30
+  settle()
+  cfg = vim.api.nvim_win_get_config(0)
+  T.eq(cfg.width, 28, "never wider than the editor")
+  T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title truncated to fit")
+  T.finish("Cancel")
+end
+
+function C.note_focus(V)
+  T.cursor(0)
+  T.keys("<Tab>x<Esc>")
+  local other = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, { relative = "editor", row = 0, col = 0, width = 5, height = 1 })
+  settle()
+  T.ok(V.note_shown(), "entering another float keeps the note")
+  vim.api.nvim_win_close(other, true)
+  vim.api.nvim_set_current_win(V.thread_win())
+  settle()
+  T.eq({ V.note_shown(), note_lines() }, { false, { "x" } }, "leaving for the thread hides it and keeps the text")
+  T.keys("<Tab>")
+  T.ok(V.note_shown(), "Tab reopens")
+  T.finish("Cancel")
+end
+
+function C.popup_undo(V)
+  T.cursor(0)
+  T.keys("<Tab>abc<Esc>u")
+  T.eq(note_lines(), { "" }, "u undoes inside the note")
+  T.keys("q")
+  T.cursor(1)
+  T.keys("ccabc<Esc>uiX<CR>")
+  T.eq(V.annotations.at(1, 0)[1].body, "X", "u undoes inside the compose popup")
+  T.finish("Cancel")
+end
+
+function C.no_undofile()
+  T.cursor(0)
+  T.keys("<Tab>secret note<Esc>q")
+  T.keys("ccsecret comment<CR>")
+  T.finish("qa")
 end
 
 return C

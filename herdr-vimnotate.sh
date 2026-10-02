@@ -39,7 +39,7 @@ for _ in 1 2; do
 done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
-VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" nvim -c "luafile $script_dir/vimnotate.lua"
+VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
 restore
 [ -f "$reply" ] || exit 0
@@ -61,7 +61,12 @@ if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$re
   "$herdr" notification show "Annotations copied to clipboard" --body "pane $pane has no agent; multi-line reply not auto-sent" --sound none || true
   exit 0
 fi
-resp="$(jq -Rsc --arg pane "$pane" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
+empty=false
+if "$herdr" pane read "$pane" --source visible 2>/dev/null \
+  | awk '/^─(.*─)?[[:space:]]*$/ { above = below; below = NR } { line[NR] = $0 } END { exit !(below && above && below == above + 2 && line[above + 1] ~ /^❯[[:space:]]*$/) }'; then
+  empty=true
+fi
+resp="$(jq -Rsc --arg pane "$pane" --argjson empty "$empty" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if $empty then "" elif test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
 if ! printf '%s' "$resp" | grep -q '"type":"ok"'; then
   clip <"$reply" || true
   "$herdr" notification show "Annotation send failed — copied to clipboard" --body "$resp" --sound none || true

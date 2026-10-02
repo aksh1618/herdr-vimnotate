@@ -657,10 +657,10 @@ local function prewarm_markdown()
   vim.api.nvim_buf_delete(buf, { force = true })
 end
 
-local function unshadow(mode, lhs)
+local function unshadow(maps, mode, lhs)
   local prefix = vim.api.nvim_replace_termcodes(lhs, true, false, true)
   local umbrella = mode == "x" and "v" or mode
-  for _, m in ipairs(vim.fn.maplist()) do
+  for _, m in ipairs(maps) do
     local applies = m.buffer == 0
       and (m.mode == " " or m.mode:find(mode, 1, true) or m.mode:find(umbrella, 1, true))
     if applies then
@@ -682,17 +682,26 @@ local TRIGGERS = {
 M.TRIGGERS = TRIGGERS
 
 local function unshadow_triggers()
+  local maps = vim.fn.maplist()
   for mode, keys in pairs(TRIGGERS) do
     for _, lhs in ipairs(keys) do
-      unshadow(mode, lhs)
+      unshadow(maps, mode, lhs)
     end
   end
 end
 M.unshadow_triggers = unshadow_triggers
+local unshadow_queued = false
 vim.api.nvim_create_autocmd("User", {
   pattern = "LazyLoad",
   callback = function()
-    vim.schedule(unshadow_triggers)
+    if unshadow_queued then
+      return
+    end
+    unshadow_queued = true
+    vim.schedule(function()
+      unshadow_queued = false
+      unshadow_triggers()
+    end)
   end,
 })
 
@@ -2346,26 +2355,22 @@ function M.export()
   local items = vim.tbl_filter(function(item)
     return not item.sent
   end, A.list())
-  if #items > 0 then
-    local out = { "# Annotations on the conversation above" }
-    for i, item in ipairs(items) do
-      local quoted = table.concat(A.text(item), "\n")
-      local body = vim.trim(item.body)
-      out[#out + 1] = ""
-      out[#out + 1] = "## Annotation " .. i
-      if item.kind == "delete" then
-        out[#out + 1] = "Remove this:"
-        out[#out + 1] = fenced(quoted)
-        out[#out + 1] = quote_lines(body ~= "" and body or "I don't want this.")
-      elseif item.kind == "good" then
-        out[#out + 1] = 'Looks good: "' .. single_line(quoted) .. '"'
-        if body ~= "" then
-          out[#out + 1] = quote_lines(body)
-        end
-      else
-        out[#out + 1] = 'Comment on: "' .. single_line(quoted) .. '"'
+  for _, item in ipairs(items) do
+    local quoted = table.concat(A.text(item), "\n")
+    local body = vim.trim(item.body)
+    local out = {}
+    if item.kind == "delete" then
+      out[#out + 1] = "Remove this:"
+      out[#out + 1] = fenced(quoted)
+      out[#out + 1] = quote_lines(body ~= "" and body or "I don't want this.")
+    elseif item.kind == "good" then
+      out[#out + 1] = 'Looks good: "' .. single_line(quoted) .. '"'
+      if body ~= "" then
         out[#out + 1] = quote_lines(body)
       end
+    else
+      out[#out + 1] = 'Comment on: "' .. single_line(quoted) .. '"'
+      out[#out + 1] = quote_lines(body)
     end
     parts[#parts + 1] = table.concat(out, "\n")
   end

@@ -207,7 +207,10 @@ local function define_highlights()
     local base = { fg = accent.fg, ctermfg = accent.ctermfg, bg = "#444444", ctermbg = 238 }
     vim.api.nvim_set_hl(0, "VimnotateHint" .. name, base)
     vim.api.nvim_set_hl(0, "VimnotateBar" .. name, vim.tbl_extend("force", base, { bold = true, cterm = { bold = true } }))
+    vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderBold", { fg = accent.fg, ctermfg = accent.ctermfg, bold = true, cterm = { bold = true } })
   end
+  vim.api.nvim_set_hl(0, "VimnotateEdge", { fg = "#626262", ctermfg = 241 })
+  vim.api.nvim_set_hl(0, "VimnotateLabel", { fg = "#8a8a8a", ctermfg = 245, italic = true, cterm = { italic = true } })
 end
 define_highlights()
 vim.api.nvim_create_autocmd("ColorScheme", { callback = define_highlights })
@@ -218,6 +221,9 @@ local range_ns = vim.api.nvim_create_namespace("vimnotate.ranges")
 local mark_ns = vim.api.nvim_create_namespace("vimnotate.marks")
 A.range_ns = range_ns
 A.mark_ns = mark_ns
+
+local view = { mode = "off", bubbles = {} }
+M.view = view
 
 local seq = 0
 math.randomseed(os.time() + vim.fn.getpid())
@@ -438,7 +444,7 @@ local function refresh_loclist()
   vim.fn.setloclist(tw, {}, "r", { title = "vimnotate annotations", items = items })
 end
 
-local HINTS = "c d + {motion} comment/delete/good · ]a [a · K show · e edit · x drop · Tab note · q send"
+local HINTS = "c d + {motion} comment/delete/good · ]a [a · K show · e edit · x drop · R view · Tab note · q send"
 local NOTE_HINTS = "general note, sent above the annotations · Tab thread · :qa send · :Cancel discard"
 
 local function thread_winbar()
@@ -453,6 +459,9 @@ local function thread_winbar()
     end
   end
   local head = #tally > 0 and ("THREAD " .. table.concat(tally, " ")) or "THREAD"
+  if view.flash then
+    head = head .. " · " .. view.flash
+  end
   return head .. " · %<" .. HINTS
 end
 
@@ -520,7 +529,7 @@ local function unshadow(mode, lhs)
 end
 
 local TRIGGERS = {
-  n = { "c", "d", "+", "a", "x", "e", "K", "]a", "[a", "q", "<Tab>", "<LeftMouse>" },
+  n = { "c", "d", "+", "a", "x", "e", "K", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
   x = { "c", "d", "+", "a", "<CR>", "<LeftMouse>" },
   o = { "c", "d", "+" },
 }
@@ -541,7 +550,9 @@ local function ensure_note()
     return win
   end
   local cur = vim.api.nvim_get_current_win()
-  vim.cmd("topleft 10split " .. vim.fn.fnameescape(note_path))
+  vim.cmd("topleft 10split")
+  vim.wo.conceallevel = 2
+  vim.cmd("edit " .. vim.fn.fnameescape(note_path))
   note_buf = vim.api.nvim_get_current_buf()
   markdown_warm = true
   vim.bo[note_buf].filetype = "markdown"
@@ -554,6 +565,8 @@ local function ensure_note()
       vim.api.nvim_set_current_win(tw)
     end
   end, { buffer = note_buf })
+  vim.keymap.set("n", "H", "H", { buffer = note_buf })
+  vim.keymap.set("n", "L", "L", { buffer = note_buf })
   hide_chrome()
   vim.api.nvim_set_current_win(cur)
   return win
@@ -917,6 +930,14 @@ end
 
 local function click(bar)
   return function()
+    local m = vim.fn.getmousepos()
+    if view.rail_win and m.winid == view.rail_win and vim.api.nvim_win_is_valid(view.rail_win) then
+      pending_click = function()
+        M.rail_click(m.line)
+      end
+      swallow = true
+      return "<Cmd>lua require('vimnotate').bar_click()<CR>"
+    end
     local run = bar_hit(bar)
     if not run then
       return "<LeftMouse>"
@@ -1313,6 +1334,713 @@ function M.remove_at_cursor()
   A.remove(item.id)
 end
 
+local RAIL_WIDTH = 36
+local RAIL_MIN_WIDTH = 28
+local RAIL_MIN_THREAD = 80
+local RAIL_FORCE_MIN_THREAD = 40
+local INLINE_INDENT = 2
+local FLASH_MS = 2500
+local rail_ns = vim.api.nvim_create_namespace("vimnotate.rail")
+local inline_ns = vim.api.nvim_create_namespace("vimnotate.inline")
+local dw = vim.fn.strdisplaywidth
+
+local function chars(s)
+  local out = {}
+  for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+    out[#out + 1] = ch
+  end
+  return out
+end
+
+local function truncate(s, width)
+  if dw(s) <= width then
+    return s
+  end
+  local out, w = {}, 0
+  for _, ch in ipairs(chars(s)) do
+    local cw = dw(ch)
+    if w + cw > width - 1 then
+      break
+    end
+    out[#out + 1] = ch
+    w = w + cw
+  end
+  return table.concat(out) .. "…"
+end
+
+local function wrap_text(text, width)
+  width = math.max(width, 1)
+  local out = {}
+  for _, para in ipairs(vim.split(text, "\n", { plain = true })) do
+    local line, lw = "", 0
+    for word in para:gmatch("%S+") do
+      local ww = dw(word)
+      if lw > 0 and lw + 1 + ww <= width then
+        line, lw = line .. " " .. word, lw + 1 + ww
+      else
+        if lw > 0 then
+          out[#out + 1] = line
+        end
+        line, lw = "", 0
+        if ww > width then
+          for _, ch in ipairs(chars(word)) do
+            local cw = dw(ch)
+            if lw > 0 and lw + cw > width then
+              out[#out + 1] = line
+              line, lw = "", 0
+            end
+            line, lw = line .. ch, lw + cw
+          end
+        else
+          line, lw = word, ww
+        end
+      end
+    end
+    out[#out + 1] = line
+  end
+  return out
+end
+
+local function accent_of(item)
+  return "Vimnotate" .. KINDS[item.kind].hl:sub(10) .. "Border"
+end
+
+local function bubble(item, width, edge, fit)
+  local kind = KINDS[item.kind]
+  local accent = accent_of(item)
+  local title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. " "
+  local body = vim.trim(item.body)
+  local lines, text_hl = { kind.label }, "VimnotateLabel"
+  if body ~= "" then
+    lines, text_hl = wrap_text(body, width - 4), nil
+  end
+  if fit then
+    local w = dw(title) + 4
+    for _, l in ipairs(lines) do
+      w = math.max(w, dw(l) + 4)
+    end
+    width = math.min(width, w)
+  end
+  title = truncate(title, width - 2)
+  local tw = dw(title)
+  local rows = { { { "╭", edge }, { title, accent }, { string.rep("─", width - 2 - tw) .. "╮", edge } } }
+  for _, l in ipairs(lines) do
+    l = truncate(l, width - 4)
+    rows[#rows + 1] = { { "│ ", edge }, { l .. string.rep(" ", width - 4 - dw(l)), text_hl }, { " │", edge } }
+  end
+  rows[#rows + 1] = { { "╰" .. string.rep("─", width - 2) .. "╯", edge } }
+  return rows
+end
+
+local function rail_valid()
+  return view.rail_win ~= nil and vim.api.nvim_win_is_valid(view.rail_win)
+end
+
+local function selected_item()
+  if view.focused then
+    return view.sel and A.items[view.sel.id] and view.sel or nil
+  end
+  return A.at_cursor()
+end
+
+local function paint(buf, rows, height)
+  local lines, marks = {}, {}
+  for i = 1, height do
+    local row = rows[i]
+    if row then
+      local parts, byte = {}, 0
+      for _, ch in ipairs(row) do
+        parts[#parts + 1] = ch[1]
+        if ch[2] then
+          marks[#marks + 1] = { i - 1, byte, byte + #ch[1], ch[2] }
+        end
+        byte = byte + #ch[1]
+      end
+      lines[i] = table.concat(parts)
+    else
+      lines[i] = ""
+    end
+  end
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_buf_clear_namespace(buf, rail_ns, 0, -1)
+  for _, mk in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(buf, rail_ns, mk[1], mk[2], { end_col = mk[3], hl_group = mk[4] })
+  end
+end
+
+local RAIL_HINTS = "j/k ⏎ jump · e edit · x drop · esc"
+
+local function rail_winbar()
+  if view.focused then
+    return " %<" .. RAIL_HINTS
+  end
+  return " ANNOTATIONS · %<S-Tab focus"
+end
+
+local function anchor_y(tw, top, skip, srow, scol)
+  local vcol = 0
+  if scol > 0 then
+    vcol = dw((vim.api.nvim_buf_get_lines(thread, srow, srow + 1, false)[1] or ""):sub(1, scol))
+  end
+  if srow > top or (srow == top and vcol >= skip) then
+    return vim.api.nvim_win_text_height(tw, { start_row = top, start_vcol = skip, end_row = srow, end_vcol = vcol + 1 }).all - 1
+  end
+  return -vim.api.nvim_win_text_height(tw, { start_row = srow, start_vcol = vcol, end_row = top, end_vcol = skip }).all
+end
+
+local function rail_render()
+  local tw = thread_win()
+  if not rail_valid() or tw == -1 then
+    return
+  end
+  local rw = view.rail_win
+  local width, height = vim.api.nvim_win_get_width(rw), vim.api.nvim_win_get_height(rw)
+  local sv = vim.api.nvim_win_call(tw, vim.fn.winsaveview)
+  local top, skip = sv.topline - 1, sv.skipcol
+  local bot = vim.fn.getwininfo(tw)[1].botline
+  local by_mark = {}
+  for _, item in pairs(A.items) do
+    by_mark[item.mark] = item
+  end
+  local sel = selected_item()
+  local rows, bubbles, next_y = {}, {}, -math.huge
+  local marks = vim.api.nvim_buf_get_extmarks(thread, range_ns, { math.max(top - height, 0), 0 }, { bot, -1 }, {})
+  for _, mk in ipairs(marks) do
+    local item = by_mark[mk[1]]
+    if item then
+      local y = math.max(anchor_y(tw, top, skip, mk[2], item.linewise and 0 or mk[3]), next_y)
+      if y >= height then
+        break
+      end
+      local edge = item == sel and (accent_of(item) .. "Bold") or "VimnotateEdge"
+      local b = bubble(item, width, edge, false)
+      local whole = y >= 0 and y + #b <= height
+      local avail = height - y
+      if avail >= 3 and avail < #b then
+        local cut = { b[1] }
+        for i = 2, avail - 2 do
+          cut[#cut + 1] = b[i]
+        end
+        local last = b[avail - 1]
+        cut[#cut + 1] = { last[1], { "…" .. string.rep(" ", width - 5), last[2][2] }, last[3] }
+        cut[#cut + 1] = b[#b]
+        b = cut
+      end
+      for i, row in ipairs(b) do
+        local ry = y + i - 1
+        if ry >= 0 and ry < height then
+          rows[ry + 1] = row
+        end
+      end
+      if y + #b > 0 then
+        bubbles[#bubbles + 1] = { item = item, y0 = math.max(y, 0), y1 = math.min(y + #b, height) - 1, whole = whole }
+      end
+      next_y = y + #b
+    end
+  end
+  paint(view.rail_buf, rows, height)
+  view.bubbles = bubbles
+  view.last_sel = sel
+  vim.wo[rw].winbar = rail_winbar()
+  view.painting = true
+  vim.api.nvim_win_call(rw, function()
+    local line = 1
+    if view.focused and sel then
+      for _, b in ipairs(bubbles) do
+        if b.item == sel then
+          line = b.y0 + 1
+        end
+      end
+    end
+    vim.fn.winrestview({ topline = 1, lnum = line, col = 0, leftcol = 0 })
+  end)
+  view.painting = false
+end
+M.rail_render = rail_render
+
+local function inline_render()
+  vim.api.nvim_buf_clear_namespace(thread, inline_ns, 0, -1)
+  local tw = thread_win()
+  if tw == -1 then
+    return
+  end
+  local info = vim.fn.getwininfo(tw)[1]
+  local width = math.max(info.width - info.textoff - INLINE_INDENT, 12)
+  local sel = A.at_cursor()
+  local groups = {}
+  for _, item in ipairs(A.list()) do
+    local erow = A.range(item).erow
+    groups[erow] = groups[erow] or {}
+    local edge = accent_of(item) .. (item == sel and "Bold" or "")
+    for _, row in ipairs(bubble(item, width, edge, true)) do
+      table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
+      table.insert(groups[erow], row)
+    end
+  end
+  for erow, vl in pairs(groups) do
+    vim.api.nvim_buf_set_extmark(thread, inline_ns, erow, 0, { virt_lines = vl })
+  end
+  view.last_sel = sel
+end
+M.inline_render = inline_render
+
+local function render_view()
+  if view.mode == "rail" then
+    rail_render()
+  elseif view.mode == "inline" then
+    inline_render()
+  end
+end
+
+local function view_setting()
+  local v = vim.g.vimnotate_view
+  if v == "rail" or v == "inline" or v == "off" then
+    return v
+  end
+  return "auto"
+end
+
+local function rail_width(total)
+  return math.max(RAIL_MIN_WIDTH, math.min(RAIL_WIDTH, math.floor(total * 3 / 10)))
+end
+
+local function total_width(tw)
+  local w = vim.api.nvim_win_get_width(tw)
+  if rail_valid() then
+    w = w + vim.api.nvim_win_get_width(view.rail_win) + 1
+  end
+  return w
+end
+
+local function rail_fits(tw, min)
+  local total = total_width(tw)
+  return total - rail_width(total) - 1 >= min
+end
+
+local function wanted(tw)
+  local s = view_setting()
+  if s == "off" or s == "inline" then
+    return s
+  end
+  if rail_fits(tw, s == "rail" and RAIL_FORCE_MIN_THREAD or RAIL_MIN_THREAD) then
+    return "rail"
+  end
+  return "inline"
+end
+
+local function scroll_thread(n)
+  local tw = thread_win()
+  if tw == -1 or n == 0 then
+    return
+  end
+  vim.api.nvim_win_call(tw, function()
+    vim.cmd("normal! " .. math.abs(n) .. (n > 0 and "\5" or "\25"))
+  end)
+end
+M.scroll_thread = scroll_thread
+
+local function wheel(key, n)
+  return function()
+    local m = vim.fn.getmousepos()
+    if rail_valid() and m.winid == view.rail_win then
+      return "<Cmd>lua require('vimnotate').scroll_thread(" .. n .. ")<CR>"
+    end
+    return key
+  end
+end
+
+local function rail_scrub(win)
+  local opts = {
+    number = false,
+    relativenumber = false,
+    signcolumn = "no",
+    foldcolumn = "0",
+    statuscolumn = "",
+    colorcolumn = "",
+    cursorline = false,
+    cursorcolumn = false,
+    list = false,
+    spell = false,
+    wrap = false,
+    scrolloff = 0,
+    sidescrolloff = 0,
+    foldenable = false,
+    conceallevel = 0,
+    winfixwidth = true,
+    winfixbuf = true,
+    fillchars = "eob: ",
+  }
+  for k, v in pairs(opts) do
+    vim.wo[win][k] = v
+  end
+  vim.wo[win].winbar = rail_winbar()
+end
+
+local function back_to_thread()
+  local tw = thread_win()
+  if tw ~= -1 then
+    vim.api.nvim_set_current_win(tw)
+  end
+end
+
+local function rail_index(items)
+  for i, it in ipairs(items) do
+    if view.sel and it.id == view.sel.id then
+      return i
+    end
+  end
+  return nil
+end
+
+local function bubble_of(item)
+  for _, b in ipairs(view.bubbles) do
+    if b.item == item then
+      return b
+    end
+  end
+  return nil
+end
+
+function M.rail_move(delta)
+  local items = A.list()
+  if #items == 0 then
+    return
+  end
+  local idx = rail_index(items) or (delta > 0 and 0 or #items + 1)
+  view.sel = items[math.max(1, math.min(#items, idx + delta))]
+  rail_render()
+  local b = bubble_of(view.sel)
+  if not (b and b.whole) then
+    local tw = thread_win()
+    local r = A.range(view.sel)
+    vim.api.nvim_win_call(tw, function()
+      vim.fn.winrestview({ topline = math.max(1, r.srow - 1), skipcol = 0, lnum = r.srow + 1, col = r.linewise and 0 or r.scol })
+    end)
+    rail_render()
+  end
+end
+
+function M.rail_edge(last)
+  local items = A.list()
+  if #items == 0 then
+    return
+  end
+  view.sel = nil
+  M.rail_move(last and #items or -#items)
+end
+
+function M.rail_jump(item)
+  item = item or selected_item()
+  local tw = thread_win()
+  if not item or tw == -1 then
+    return
+  end
+  local r = A.range(item)
+  vim.api.nvim_set_current_win(tw)
+  vim.api.nvim_win_set_cursor(tw, { r.srow + 1, r.linewise and 0 or r.scol })
+end
+
+function M.rail_edit()
+  local item = selected_item()
+  if item then
+    M.compose({ item = item })
+  end
+end
+
+function M.rail_remove()
+  local item = selected_item()
+  if not item then
+    return
+  end
+  local items = A.list()
+  local idx = rail_index(items) or 1
+  view.sel = items[idx + 1] or items[idx - 1]
+  A.remove(item.id)
+end
+
+function M.rail_click(line)
+  if vim.api.nvim_get_mode().mode:find("^[vV\22]") then
+    vim.cmd("normal! \27")
+  end
+  for _, b in ipairs(view.bubbles) do
+    if line - 1 >= b.y0 and line - 1 <= b.y1 then
+      M.rail_jump(b.item)
+      return
+    end
+  end
+end
+
+function M.rail_focus()
+  if rail_valid() then
+    vim.api.nvim_set_current_win(view.rail_win)
+  else
+    warn("rail is not shown (R cycles the view)")
+  end
+end
+
+local function rail_buffer()
+  if view.rail_buf and vim.api.nvim_buf_is_valid(view.rail_buf) then
+    return view.rail_buf
+  end
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].modifiable = false
+  view.rail_buf = buf
+  local o = { buffer = buf, nowait = true }
+  local function count(dir)
+    return function()
+      M.rail_move(dir * vim.v.count1)
+    end
+  end
+  vim.keymap.set("n", "j", count(1), o)
+  vim.keymap.set("n", "k", count(-1), o)
+  vim.keymap.set("n", "<Down>", count(1), o)
+  vim.keymap.set("n", "<Up>", count(-1), o)
+  vim.keymap.set("n", "gg", function()
+    M.rail_edge(false)
+  end, o)
+  vim.keymap.set("n", "G", function()
+    M.rail_edge(true)
+  end, o)
+  vim.keymap.set("n", "<CR>", function()
+    M.rail_jump()
+  end, o)
+  vim.keymap.set("n", "e", M.rail_edit, o)
+  vim.keymap.set("n", "x", M.rail_remove, o)
+  vim.keymap.set("n", "R", function()
+    M.cycle_view()
+  end, o)
+  vim.keymap.set("n", "q", "<Cmd>qa<CR>", o)
+  for _, lhs in ipairs({ "<Esc>", "h", "<S-Tab>", "<Tab>" }) do
+    vim.keymap.set("n", lhs, back_to_thread, o)
+  end
+  for _, lhs in ipairs({ "H", "L", "l", "<2-LeftMouse>", "<3-LeftMouse>", "<LeftDrag>", "<LeftRelease>" }) do
+    vim.keymap.set("n", lhs, "<Nop>", o)
+  end
+  vim.keymap.set("n", "<LeftMouse>", function()
+    local m = vim.fn.getmousepos()
+    if m.winid ~= view.rail_win then
+      return "<LeftMouse>"
+    end
+    pending_click = function()
+      M.rail_click(m.line)
+    end
+    swallow = true
+    return "<Cmd>lua require('vimnotate').bar_click()<CR>"
+  end, { buffer = buf, nowait = true, expr = true })
+  for _, s in ipairs({ { "<ScrollWheelDown>", 3 }, { "<ScrollWheelUp>", -3 }, { "<C-e>", 1 }, { "<C-y>", -1 } }) do
+    vim.keymap.set("n", s[1], function()
+      scroll_thread(s[2] * (s[1]:find("Wheel") and 1 or vim.v.count1))
+    end, o)
+  end
+  for _, s in ipairs({ { "<C-d>", 1 }, { "<C-u>", -1 } }) do
+    vim.keymap.set("n", s[1], function()
+      local tw = thread_win()
+      if tw ~= -1 then
+        scroll_thread(s[2] * math.floor(vim.api.nvim_win_get_height(tw) / 2))
+      end
+    end, o)
+  end
+  local group = vim.api.nvim_create_augroup("vimnotate.rail", { clear = true })
+  vim.api.nvim_create_autocmd("WinEnter", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      view.focused = true
+      bars_hide()
+      if not (view.sel and A.items[view.sel.id]) then
+        view.sel = A.at_cursor() or (view.bubbles[1] and view.bubbles[1].item) or A.list()[1]
+      end
+      rail_render()
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinLeave", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      view.focused = false
+      view.sel = nil
+      vim.schedule(rail_render)
+    end,
+  })
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      if view.painting or not view.focused then
+        return
+      end
+      local line = vim.api.nvim_win_get_cursor(0)[1] - 1
+      for _, b in ipairs(view.bubbles) do
+        if line >= b.y0 and line <= b.y1 and b.item ~= view.sel then
+          view.sel = b.item
+          rail_render()
+          return
+        end
+      end
+    end,
+  })
+  return buf
+end
+
+local function rail_open(tw)
+  local width = rail_width(total_width(tw))
+  if rail_valid() then
+    if vim.api.nvim_win_get_width(view.rail_win) ~= width then
+      vim.api.nvim_win_set_width(view.rail_win, width)
+    end
+    return
+  end
+  view.rail_win = vim.api.nvim_open_win(rail_buffer(), false, { split = "right", win = tw, width = width })
+  rail_scrub(view.rail_win)
+end
+
+local function rail_close()
+  if rail_valid() then
+    local win = view.rail_win
+    view.rail_win = nil
+    vim.api.nvim_win_close(win, true)
+  end
+  view.rail_win = nil
+  view.focused = false
+  view.bubbles = {}
+end
+
+local function apply_view()
+  local tw = thread_win()
+  if view.applying or tw == -1 then
+    return
+  end
+  view.applying = true
+  local want = wanted(tw)
+  if want ~= "rail" then
+    rail_close()
+  end
+  if want ~= "inline" then
+    vim.api.nvim_buf_clear_namespace(thread, inline_ns, 0, -1)
+  end
+  view.mode = want
+  if want == "rail" then
+    rail_open(tw)
+  end
+  render_view()
+  view.applying = false
+end
+M.apply_view = apply_view
+
+local function flash(text)
+  view.flash = text
+  view.flash_token = (view.flash_token or 0) + 1
+  local token = view.flash_token
+  refresh_winbar()
+  vim.defer_fn(function()
+    if view.flash_token == token then
+      view.flash = nil
+      refresh_winbar()
+    end
+  end, FLASH_MS)
+end
+
+function M.cycle_view()
+  local tw = thread_win()
+  if tw == -1 then
+    return
+  end
+  local order = { "rail", "inline", "off" }
+  local idx = 3
+  for i, v in ipairs(order) do
+    if v == view.mode then
+      idx = i
+    end
+  end
+  local nxt
+  for step = 1, 3 do
+    local cand = order[(idx - 1 + step) % 3 + 1]
+    if cand ~= "rail" or rail_fits(tw, RAIL_FORCE_MIN_THREAD) then
+      nxt = cand
+      break
+    end
+  end
+  vim.g.vimnotate_view = nxt
+  back_to_thread()
+  apply_view()
+  flash("view: " .. nxt .. (nxt == "rail" and " (S-Tab focus)" or ""))
+end
+
+local view_group = vim.api.nvim_create_augroup("vimnotate.view", { clear = true })
+local resize_pending = false
+vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+  group = view_group,
+  callback = function()
+    render_view()
+    if resize_pending then
+      return
+    end
+    resize_pending = true
+    vim.schedule(function()
+      resize_pending = false
+      apply_view()
+    end)
+  end,
+})
+vim.api.nvim_create_autocmd("WinScrolled", {
+  group = view_group,
+  callback = function()
+    if view.mode ~= "rail" or not rail_valid() then
+      return
+    end
+    local ev = vim.v.event[tostring(view.rail_win)]
+    if ev and ev.topline > 0 and vim.fn.line("w0", view.rail_win) > 1 then
+      scroll_thread(ev.topline)
+    end
+    rail_render()
+  end,
+})
+vim.api.nvim_create_autocmd("CursorMoved", {
+  group = view_group,
+  buffer = thread,
+  callback = function()
+    if view.mode ~= "off" and not view.focused and A.at_cursor() ~= view.last_sel then
+      render_view()
+    end
+  end,
+})
+vim.api.nvim_create_autocmd("WinClosed", {
+  group = view_group,
+  callback = function(ev)
+    local win = tonumber(ev.match)
+    if win == view.rail_win then
+      view.rail_win = nil
+      view.focused = false
+      if not view.applying then
+        vim.g.vimnotate_view = "off"
+        view.mode = "off"
+      end
+    elseif win == thread_win() and rail_valid() then
+      vim.schedule(function()
+        if #vim.tbl_filter(function(w)
+          return vim.api.nvim_win_get_config(w).relative == ""
+        end, vim.api.nvim_list_wins()) <= 1 then
+          vim.cmd("qa")
+        else
+          rail_close()
+        end
+      end)
+    end
+  end,
+})
+A.on_change(function()
+  vim.schedule(render_view)
+end)
+M.wheel = wheel
+M.rail_scrub = function()
+  if rail_valid() then
+    rail_scrub(view.rail_win)
+  end
+end
+
 local function fenced(text)
   local longest = 0
   for run in text:gmatch("`+") do
@@ -1417,6 +2145,12 @@ vim.keymap.set("n", "q", "<Cmd>qa<CR>", bo)
 vim.keymap.set("n", "<Tab>", function()
   vim.api.nvim_set_current_win(ensure_note())
 end, bo)
+vim.keymap.set("n", "<S-Tab>", M.rail_focus, bo)
+vim.keymap.set("n", "R", M.cycle_view, bo)
+vim.keymap.set("n", "H", "H", bo)
+vim.keymap.set("n", "L", "L", bo)
+vim.keymap.set("n", "<ScrollWheelDown>", M.wheel("<ScrollWheelDown>", 3), ebo)
+vim.keymap.set("n", "<ScrollWheelUp>", M.wheel("<ScrollWheelUp>", -3), ebo)
 unshadow_triggers()
 
 vim.wo.winbar = thread_winbar()
@@ -1454,6 +2188,8 @@ local function find_in_thread(text)
 end
 M.find_in_thread = find_in_thread
 
+apply_view()
+
 local anchored = false
 local selected_path = vim.env.VIMNOTATE_SELECTED
 if selected_path and selected_path ~= "" then
@@ -1483,6 +2219,8 @@ vim.defer_fn(function()
   if tw ~= -1 then
     scrub_win(tw)
     vim.wo[tw].winbar = thread_winbar()
+    M.rail_scrub()
+    apply_view()
     if not anchored then
       vim.api.nvim_win_call(tw, function()
         vim.cmd("normal! G")
@@ -1495,4 +2233,6 @@ vim.defer_fn(function()
   hide_chrome()
   unshadow_triggers()
   scrub_win(thread_win())
+  M.rail_scrub()
+  apply_view()
 end, 1500)

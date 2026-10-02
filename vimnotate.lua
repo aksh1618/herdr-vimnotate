@@ -1,5 +1,6 @@
 local raw_path = vim.env.VIMNOTATE_RAW
 local reply_path = vim.env.VIMNOTATE_REPLY
+local state_path = vim.env.VIMNOTATE_STATE ~= "" and vim.env.VIMNOTATE_STATE or nil
 local note_path = vim.fn.fnamemodify(reply_path, ":h") .. "/note.md"
 
 local M = {}
@@ -211,6 +212,14 @@ local function define_highlights()
     vim.api.nvim_set_hl(0, "VimnotateBar" .. name, vim.tbl_extend("force", base, { bold = true, cterm = { bold = true } }))
     vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderBold", { fg = accent.fg, ctermfg = accent.ctermfg, bold = true, cterm = { bold = true } })
   end
+  vim.api.nvim_set_hl(0, "VimnotateCommentSent", { bg = "#3a3a1c", ctermbg = 237 })
+  vim.api.nvim_set_hl(0, "VimnotateGoodSent", { bg = "#1c3a1c", ctermbg = 237 })
+  vim.api.nvim_set_hl(0, "VimnotateDeleteSent", { bg = "#3a1c1c", ctermbg = 237, strikethrough = true, cterm = { strikethrough = true } })
+  vim.api.nvim_set_hl(0, "VimnotateSentMark", { fg = "#6c6c6c", ctermfg = 242, italic = true, cterm = { italic = true } })
+  for name, dim in pairs({ Comment = { "#87875f", 101 }, Good = { "#5f875f", 65 }, Delete = { "#875f5f", 95 } }) do
+    vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderSent", { fg = dim[1], ctermfg = dim[2] })
+    vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderSentBold", { fg = dim[1], ctermfg = dim[2], bold = true, cterm = { bold = true } })
+  end
   vim.api.nvim_set_hl(0, "VimnotateEdge", { fg = "#626262", ctermfg = 241 })
   vim.api.nvim_set_hl(0, "VimnotateLabel", { fg = "#8a8a8a", ctermfg = 245, italic = true, cterm = { italic = true } })
 end
@@ -252,7 +261,7 @@ local function place(item, r)
   local opts = {
     end_row = r.erow,
     end_col = r.linewise and line_len(r.erow) or r.ecol,
-    hl_group = kind.hl,
+    hl_group = item.sent and (kind.hl .. "Sent") or kind.hl,
     hl_eol = r.linewise or nil,
     priority = 4200 + kind.priority,
     right_gravity = false,
@@ -263,7 +272,7 @@ local function place(item, r)
   end
   item.mark = vim.api.nvim_buf_set_extmark(thread, range_ns, r.srow, r.linewise and 0 or r.scol, opts)
   local tag = {
-    virt_text = { { " " .. kind.glyph .. " " .. A.short_id(item.id), kind.mark } },
+    virt_text = { { " " .. kind.glyph .. " " .. A.short_id(item.id) .. (item.sent and " · sent" or ""), item.sent and "VimnotateSentMark" or kind.mark } },
     virt_text_pos = "eol",
     hl_mode = "combine",
   }
@@ -328,6 +337,7 @@ local function snapshot(item)
     linewise = item.linewise,
     body = item.body,
     seq = item.seq,
+    sent = item.sent,
     srow = r.srow,
     scol = r.scol,
     erow = r.erow,
@@ -348,7 +358,7 @@ local function record(op)
 end
 
 local function revive(s)
-  local item = { id = s.id, kind = s.kind, linewise = s.linewise, body = s.body, seq = s.seq }
+  local item = { id = s.id, kind = s.kind, linewise = s.linewise, body = s.body, seq = s.seq, sent = s.sent }
   place(item, s)
   A.items[item.id] = item
   emit("add", item)
@@ -357,7 +367,7 @@ end
 
 function A.add(spec)
   seq = seq + 1
-  local item = { id = new_id(), kind = spec.kind, linewise = spec.linewise or false, body = spec.body or "", seq = seq }
+  local item = { id = new_id(), kind = spec.kind, linewise = spec.linewise or false, body = spec.body or "", seq = seq, sent = spec.sent }
   place(item, spec)
   A.items[item.id] = item
   record({ op = "add", snap = snapshot(item) })
@@ -374,15 +384,22 @@ function A.update(id, fields)
   if not item then
     return nil
   end
-  local old = { body = item.body, kind = item.kind }
+  local old = { body = item.body, kind = item.kind, sent = item.sent or false }
   if fields.body ~= nil then
     item.body = fields.body
   end
-  if fields.kind and fields.kind ~= item.kind then
+  if fields.kind then
     item.kind = fields.kind
+  end
+  if fields.sent ~= nil then
+    item.sent = fields.sent
+  elseif item.body ~= old.body or item.kind ~= old.kind then
+    item.sent = false
+  end
+  local new = { body = item.body, kind = item.kind, sent = item.sent or false }
+  if new.kind ~= old.kind or new.sent ~= old.sent then
     place(item, A.range(item))
   end
-  local new = { body = item.body, kind = item.kind }
   if not vim.deep_equal(old, new) then
     record({ op = "update", id = id, before = old, after = new })
   end
@@ -472,7 +489,7 @@ function A.describe(item)
   local kind = KINDS[item.kind]
   local body = vim.trim(item.body)
   local detail = body ~= "" and single_line(body) or ('"' .. vim.fn.strcharpart(single_line(table.concat(A.text(item), " ")), 0, 60) .. '"')
-  return kind.glyph .. " " .. A.short_id(item.id) .. " " .. kind.label .. ": " .. detail
+  return kind.glyph .. " " .. A.short_id(item.id) .. " " .. kind.label .. (item.sent and " (sent)" or "") .. ": " .. detail
 end
 
 local VERBS = { add = "added", remove = "removed", update = "edited" }
@@ -568,15 +585,22 @@ local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show �
 local NOTE_HINTS = "general note, sent above the annotations · Tab thread · :qa send · :Cancel discard"
 
 local function thread_winbar()
-  local counts = {}
+  local counts, sent = {}, 0
   for _, item in pairs(A.items) do
-    counts[item.kind] = (counts[item.kind] or 0) + 1
+    if item.sent then
+      sent = sent + 1
+    else
+      counts[item.kind] = (counts[item.kind] or 0) + 1
+    end
   end
   local tally = {}
   for _, k in ipairs({ "comment", "delete", "good" }) do
     if counts[k] then
       tally[#tally + 1] = KINDS[k].glyph .. counts[k]
     end
+  end
+  if sent > 0 then
+    tally[#tally + 1] = sent .. " sent"
   end
   local head = #tally > 0 and ("THREAD " .. table.concat(tally, " ")) or "THREAD"
   if view.flash then
@@ -1333,6 +1357,9 @@ local function apply_op(kind, type)
   for _, item in pairs(A.items) do
     local o = A.range(item)
     if item.kind == kind and o.linewise == r.linewise and o.srow == r.srow and o.erow == r.erow and (r.linewise or (o.scol == r.scol and o.ecol == r.ecol)) then
+      if item.sent then
+        A.update(item.id, { sent = false })
+      end
       return
     end
   end
@@ -1516,13 +1543,13 @@ local function wrap_text(text, width)
 end
 
 local function accent_of(item)
-  return "Vimnotate" .. KINDS[item.kind].hl:sub(10) .. "Border"
+  return "Vimnotate" .. KINDS[item.kind].hl:sub(10) .. "Border" .. (item.sent and "Sent" or "")
 end
 
 local function bubble(item, width, edge, fit)
   local kind = KINDS[item.kind]
   local accent = accent_of(item)
-  local title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. " "
+  local title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. (item.sent and " · sent " or " ")
   local body = vim.trim(item.body)
   local lines, text_hl = { kind.label }, "VimnotateLabel"
   if body ~= "" then
@@ -2316,7 +2343,9 @@ function M.export()
       parts[#parts + 1] = note
     end
   end
-  local items = A.list()
+  local items = vim.tbl_filter(function(item)
+    return not item.sent
+  end, A.list())
   if #items > 0 then
     local out = { "# Annotations on the conversation above" }
     for i, item in ipairs(items) do
@@ -2343,6 +2372,40 @@ function M.export()
   return table.concat(parts, "\n\n")
 end
 
+local function context(row)
+  local l = row >= 0 and vim.api.nvim_buf_get_lines(thread, row, row + 1, false)[1]
+  return l and single_line(l) or nil
+end
+
+local carried = {}
+
+local function save_state()
+  if not state_path then
+    return
+  end
+  local items = vim.list_extend({}, carried)
+  for _, item in ipairs(A.list()) do
+    local r = A.range(item)
+    items[#items + 1] = {
+      kind = item.kind,
+      body = item.body,
+      text = table.concat(A.text(item), "\n"),
+      linewise = item.linewise,
+      before = context(r.srow - 1),
+      after = context(r.erow + 1),
+    }
+  end
+  vim.fn.mkdir(vim.fn.fnamemodify(state_path, ":h"), "p")
+  local tmp = state_path .. ".tmp"
+  local out = io.open(tmp, "wb")
+  if not out then
+    return
+  end
+  out:write(vim.json.encode({ pane = vim.env.VIMNOTATE_TARGET_PANE, items = items }))
+  out:close()
+  os.rename(tmp, state_path)
+end
+
 local function flush()
   if cancelled then
     return
@@ -2350,6 +2413,7 @@ local function flush()
   if compose then
     compose_finish(true)
   end
+  save_state()
   local text = M.export()
   if text == "" then
     os.remove(reply_path)
@@ -2423,38 +2487,92 @@ unshadow_triggers()
 vim.wo.winbar = thread_winbar()
 hide_chrome()
 
-local function find_in_thread(text)
+local hay = nil
+
+local function find_all(text)
   local needle = text:gsub("%s+", "")
   if needle == "" then
-    return nil
+    return {}, 0
   end
-  local hay, rows, cols = {}, {}, {}
-  for r, l in ipairs(vim.api.nvim_buf_get_lines(thread, 0, -1, false)) do
-    for pos, ch in l:gmatch("()(%S)") do
-      hay[#hay + 1] = ch
-      rows[#rows + 1] = r - 1
-      cols[#cols + 1] = pos - 1
+  if not hay then
+    local chars_, rows, cols = {}, {}, {}
+    for r, l in ipairs(vim.api.nvim_buf_get_lines(thread, 0, -1, false)) do
+      for pos, ch in l:gmatch("()(%S)") do
+        chars_[#chars_ + 1] = ch
+        rows[#rows + 1] = r - 1
+        cols[#cols + 1] = pos - 1
+      end
     end
+    hay = { s = table.concat(chars_), rows = rows, cols = cols }
   end
-  hay = table.concat(hay)
-  local last
-  local init = 1
+  local out, init = {}, 1
   while true do
-    local s = hay:find(needle, init, true)
+    local s = hay.s:find(needle, init, true)
     if not s then
       break
     end
-    last = s
+    local e = s + #needle - 1
+    out[#out + 1] = { srow = hay.rows[s], scol = hay.cols[s], erow = hay.rows[e], ecol = hay.cols[e] + 1, linewise = false }
     init = s + 1
   end
-  if not last then
-    return nil
-  end
-  local e = last + #needle - 1
-  return { srow = rows[last], scol = cols[last], erow = rows[e], ecol = cols[e] + 1, linewise = false }
+  return out, #needle
+end
+
+local function find_in_thread(text)
+  local all = find_all(text)
+  return all[#all]
 end
 M.find_in_thread = find_in_thread
 
+local RESTORE_MIN_CHARS = 8
+
+local function restore_sent()
+  if not state_path then
+    return
+  end
+  local fh = io.open(state_path, "rb")
+  if not fh then
+    return
+  end
+  local ok, data = pcall(vim.json.decode, fh:read("*a"))
+  fh:close()
+  if not ok or type(data) ~= "table" or type(data.items) ~= "table" then
+    return
+  end
+  if vim.g.vimnotate_restore == false then
+    carried = data.items
+    return
+  end
+  local restored, dropped = 0, 0
+  H.muted = true
+  for _, saved in ipairs(data.items) do
+    local best, score
+    local found, len = find_all(type(saved.text) == "string" and saved.text or "")
+    for _, r in ipairs(found) do
+      local sc = (saved.before and context(r.srow - 1) == saved.before and 1 or 0)
+        + (saved.after and context(r.erow + 1) == saved.after and 1 or 0)
+      if not best or sc >= score then
+        best, score = r, sc
+      end
+    end
+    if best and KINDS[saved.kind] and (score > 0 or len >= RESTORE_MIN_CHARS) then
+      if saved.linewise then
+        best.linewise, best.scol, best.ecol = true, 0, line_len(best.erow)
+      end
+      best.kind, best.body, best.sent = saved.kind, type(saved.body) == "string" and saved.body or "", true
+      A.add(best)
+      restored = restored + 1
+    else
+      dropped = dropped + 1
+    end
+  end
+  H.muted = false
+  if restored + dropped > 0 then
+    M.flash("restored " .. restored .. " sent" .. (dropped > 0 and (", " .. dropped .. " not found") or ""))
+  end
+end
+
+restore_sent()
 apply_view()
 
 local anchored = false

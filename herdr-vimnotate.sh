@@ -7,6 +7,7 @@ tab="${VIMNOTATE_TAB:?}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 reply="$dir/reply.md"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate/$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
 restore() {
   [ -n "$restored" ] && return 0
@@ -38,7 +39,7 @@ for _ in 1 2; do
 done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
-VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" nvim -c "luafile $script_dir/vimnotate.lua"
+VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" nvim -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
 restore
 [ -f "$reply" ] || exit 0

@@ -8,6 +8,17 @@ pane="$(printf '%s' "$ctx" | jq -r '.focused_pane_id // empty')"
 info="$("$herdr" pane get "$pane")"
 tab="$(printf '%s' "$info" | jq -r '.result.pane.tab_id')"
 workspace="$(printf '%s' "$info" | jq -r '.result.pane.workspace_id')"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate"
+if [ -d "$state_dir" ]; then
+  find "$state_dir" -maxdepth 1 -name '*.json' -mtime +7 -delete 2>/dev/null || true
+  for f in "$state_dir"/*.json; do
+    [ -e "$f" ] || continue
+    owner="$(jq -r '.pane // empty' "$f" 2>/dev/null || true)"
+    if [ -n "$owner" ] && ! "$herdr" pane get "$owner" >/dev/null 2>&1; then
+      rm -f "$f"
+    fi
+  done
+fi
 lines="${VIMNOTATE_LINES:-1000}"
 dir="$(mktemp -d "${TMPDIR:-/tmp}/herdr-vimnotate.XXXXXX")"
 "$herdr" pane read "$pane" --source visible --format ansi >"$dir/visible.ansi" 2>/dev/null || true

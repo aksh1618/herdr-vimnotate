@@ -478,6 +478,8 @@ function C.note_layout(V, A)
   local cfg = vim.api.nvim_win_get_config(0)
   T.eq({ cfg.width, cfg.height, cfg.row, cfg.col }, { 100, 22, 12, 29 }, "160x50: centred, width capped")
   T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title fits: " .. title_of(cfg))
+  T.eq(title_of(cfg), " note · sent first · q/Tab close · i insert ", "160: full normal-mode title")
+  T.eq({ cfg.footer, cfg.footer_pos }, { nil, nil }, "no footer")
   T.eq(layout(), before, "thread and rail keep their size with the note open")
   vim.o.columns = 80
   vim.o.lines = 24
@@ -485,11 +487,14 @@ function C.note_layout(V, A)
   cfg = vim.api.nvim_win_get_config(0)
   T.eq({ cfg.width, cfg.height, cfg.row, cfg.col }, { 56, 10, 5, 11 }, "80x24: recomputed on resize")
   T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title fits at 80 columns")
+  T.eq(title_of(cfg), " note · sent first · q/Tab close · i insert ", "80: full normal-mode title")
   vim.o.columns = 30
   settle()
   cfg = vim.api.nvim_win_get_config(0)
   T.eq(cfg.width, 28, "never wider than the editor")
   T.ok(vim.fn.strdisplaywidth(title_of(cfg)) <= cfg.width, "title truncated to fit")
+  T.eq(title_of(cfg), " note · q/Tab close ", "30: drops sent first and i insert, keeps the close hint")
+  T.eq(V.note_title(12), " note · q/T…", "narrower still: truncated")
   T.finish("Cancel")
 end
 
@@ -524,6 +529,172 @@ function C.no_undofile()
   T.keys("<Tab>secret note<Esc>q")
   T.keys("ccsecret comment<CR>")
   T.finish("qa")
+end
+
+local function rail_lines(V)
+  return vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(V.view.rail_win), 0, -1, false)
+end
+
+local function set_note(V, text)
+  V.note_show()
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(text, "\n", { plain = true }))
+  vim.cmd("stopinsert")
+  V.note_hide()
+  settle()
+end
+
+local function rail_setup(V)
+  vim.g.vimnotate_view = "rail"
+  vim.o.columns = 160
+  vim.o.lines = 50
+  T.add(1, "good")
+  T.add(20, "comment", "later")
+  settle()
+  vim.api.nvim_win_call(V.thread_win(), function()
+    vim.fn.winrestview({ topline = 1, lnum = 1, col = 0 })
+  end)
+  V.rail_render()
+end
+
+function C.note_title_insert(V)
+  T.cursor(0)
+  local seen
+  _G.vimnotate_test_capture = function()
+    seen = { vim.fn.mode(), title_of(vim.api.nvim_win_get_config(0)), V.note_title(19) }
+  end
+  T.keys("<Tab>abc<Cmd>lua vimnotate_test_capture()<CR><Esc>")
+  T.eq(seen, { "i", " note · sent first · esc normal ", " note · esc normal " }, "insert-mode title, narrow one drops sent first")
+  T.eq(title_of(vim.api.nvim_win_get_config(0)), " note · sent first · q/Tab close · i insert ", "normal-mode title after esc")
+  T.finish("Cancel")
+end
+
+function C.note_marker(V)
+  local wb = function()
+    return vim.wo[V.thread_win()].winbar
+  end
+  T.ok(wb():find("✎", 1, true) == nil, "no marker without a note")
+  set_note(V, "hello")
+  T.ok(wb():find("%@v:lua.vimnotate_note_click@%#VimnotateWinbarNote#✎ note%*%T", 1, true) ~= nil, "marker is highlighted and clickable: " .. wb())
+  T.ok(wb():find("✎", 1, true) < wb():find("%<", 1, true), "marker sits before the truncation point")
+  local mark = vim.api.nvim_get_hl(0, { name = "VimnotateWinbarNote" })
+  local accent = vim.api.nvim_get_hl(0, { name = "VimnotateCommentBorder" })
+  T.eq({ mark.fg, mark.ctermfg }, { accent.fg, accent.ctermfg }, "marker uses the comment accent")
+  vim.o.columns = 80
+  settle()
+  local head = vim.api.nvim_eval_statusline(wb(), { winid = V.thread_win(), maxwidth = vim.api.nvim_win_get_width(V.thread_win()), use_winbar = true, highlights = true })
+  T.ok(head.str:find("✎ note", 1, true) ~= nil, "marker survives truncation at 80 columns: " .. head.str)
+  local yellow = false
+  for _, h in ipairs(head.highlights) do
+    if h.group == "VimnotateWinbarNote" then
+      yellow = true
+    end
+  end
+  T.ok(yellow, "marker drawn with VimnotateWinbarNote")
+  _G.vimnotate_note_click(0, 1, "r", "    ")
+  settle()
+  T.ok(not V.note_shown(), "right click does nothing")
+  _G.vimnotate_note_click(0, 1, "l", "    ")
+  settle()
+  T.ok(V.note_shown(), "clicking the marker opens the note")
+  V.note_hide()
+  T.finish("Cancel")
+end
+
+function C.pin_rail(V, A)
+  rail_setup(V)
+  T.ok(rail_lines(V)[1]:find("✎", 1, true) == nil, "empty note: nothing pinned")
+  T.eq(V.view.bubbles[1].y0, 1, "empty note: first bubble at its anchor")
+  set_note(V, "first point\nsecond point")
+  local lines = rail_lines(V)
+  T.ok(lines[1]:find("╭ ✎ note ", 1, true) == 1, "pinned title on row 0: " .. lines[1])
+  T.ok(lines[2]:find("first point", 1, true) ~= nil and lines[3]:find("second point", 1, true) ~= nil, "note text inside the bubble")
+  T.ok(lines[4]:find("╰", 1, true) == 1, "pinned bubble closes after its text")
+  T.eq({ V.view.bubbles[1].item, V.view.bubbles[1].y0, V.view.bubbles[1].y1 }, { V.pin.item, 0, 3 }, "note is the first bubble")
+  T.eq(V.view.bubbles[2].y0, 4, "annotation anchored above the pin is pushed below it")
+  T.eq(V.view.bubbles[3].y0, 20, "annotation further down keeps its anchor")
+  local marks = vim.api.nvim_buf_get_extmarks(vim.api.nvim_win_get_buf(V.view.rail_win), -1, { 0, 0 }, { 0, -1 }, { details = true })
+  local title_hl
+  for _, m in ipairs(marks) do
+    if m[3] == 3 then
+      title_hl = m[4].hl_group
+    end
+  end
+  T.eq(title_hl, "VimnotateCommentBorder", "pinned title in the comment accent")
+  vim.api.nvim_win_call(V.thread_win(), function()
+    vim.cmd("normal! 10\5")
+  end)
+  V.rail_render()
+  T.ok(rail_lines(V)[1]:find("╭ ✎ note ", 1, true) == 1, "pin does not scroll with the thread")
+  T.eq(V.view.bubbles[2].y0, 10, "scrolled annotation keeps its anchor below the pin")
+  set_note(V, "1\n2\n3\n4\n5\n6\n7\n8")
+  lines = rail_lines(V)
+  T.eq({ V.view.bubbles[1].y1, vim.trim(lines[5]:gsub("│", "")) }, { 5, "…" }, "long note capped at 6 rows with an ellipsis")
+  T.ok(lines[6]:find("╰", 1, true) == 1, "capped bubble still closes")
+  set_note(V, "  ")
+  T.ok(rail_lines(V)[1]:find("✎", 1, true) == nil, "blank note unpins")
+  vim.g.vimnotate_view = "inline"
+  set_note(V, "x")
+  V.apply_view()
+  T.eq({ V.view.mode, V.view.rail_win and vim.api.nvim_win_is_valid(V.view.rail_win) or false }, { "inline", false }, "inline view has no rail and no pin")
+  T.ok(not V.pin.on(), "pin is off in inline view")
+  T.finish("Cancel")
+end
+
+function C.pin_alone(V)
+  vim.g.vimnotate_view = "rail"
+  vim.o.columns = 160
+  set_note(V, "only a note")
+  V.apply_view()
+  T.eq(#layout(), 1, "a note alone does not open the rail")
+  T.finish("Cancel")
+end
+
+function C.pin_nav(V, A)
+  rail_setup(V)
+  set_note(V, "the note")
+  V.rail_focus()
+  T.eq(V.view.sel, V.pin.item, "entering the rail with no annotation under the cursor selects the note")
+  T.keys("j")
+  T.eq(V.view.sel and V.view.sel.kind, "good", "j moves to the first annotation")
+  T.keys("k")
+  T.eq(V.view.sel, V.pin.item, "k moves back to the note")
+  T.keys("k")
+  T.eq(V.view.sel, V.pin.item, "k stops at the note")
+  T.keys("G")
+  T.eq(V.view.sel and V.view.sel.kind, "comment", "G goes to the last annotation")
+  T.keys("gg")
+  T.eq(V.view.sel, V.pin.item, "gg goes to the note")
+  local edge
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, -1, { 0, 0 }, { 0, -1 }, { details = true })) do
+    if m[3] == 0 then
+      edge = m[4].hl_group
+    end
+  end
+  T.eq(edge, "VimnotateCommentBorderBold", "selected note gets the bold accent edge")
+  T.keys("x")
+  settle()
+  T.eq({ #A.list(), V.note_shown(), vim.api.nvim_get_current_win() == V.view.rail_win }, { 2, false, true }, "x on the note does nothing")
+  T.ok(V.pin.on(), "note still pinned after x")
+  T.keys("<CR>")
+  T.eq({ V.note_shown(), vim.fn.mode() }, { true, "n" }, "enter on the note opens the popup")
+  T.keys("q")
+  settle()
+  T.eq(vim.api.nvim_get_current_win(), V.thread_win(), "closing returns to the thread")
+  V.rail_focus()
+  T.keys("ggk")
+  T.keys("e")
+  T.ok(V.note_shown(), "e on the note opens the popup")
+  T.keys("A more<Esc>q")
+  settle()
+  T.ok(rail_lines(V)[2]:find("the note more", 1, true) ~= nil, "pinned bubble updates when the popup closes")
+  V.rail_click(2)
+  settle()
+  T.ok(V.note_shown(), "clicking the pinned bubble opens the popup")
+  T.keys("q")
+  settle()
+  V.rail_click(5)
+  T.eq({ V.note_shown(), vim.api.nvim_win_get_cursor(V.thread_win())[1] }, { false, 2 }, "clicking an annotation below still jumps to it")
+  T.finish("Cancel")
 end
 
 return C

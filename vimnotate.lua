@@ -231,6 +231,7 @@ local function define_highlights()
   end
   vim.api.nvim_set_hl(0, "VimnotateEdge", { fg = "#626262", ctermfg = 241 })
   vim.api.nvim_set_hl(0, "VimnotateLabel", { fg = "#8a8a8a", ctermfg = 245, italic = true, cterm = { italic = true } })
+  vim.api.nvim_set_hl(0, "VimnotateWinbarNote", { fg = "#d7d700", ctermfg = 184, bold = true, cterm = { bold = true } })
 end
 define_highlights()
 vim.api.nvim_create_autocmd("ColorScheme", { callback = define_highlights })
@@ -611,7 +612,7 @@ local function thread_winbar()
     tally[#tally + 1] = sent .. " sent"
   end
   if note_text() ~= "" then
-    tally[#tally + 1] = "✎ note"
+    tally[#tally + 1] = "%@v:lua.vimnotate_note_click@%#VimnotateWinbarNote#✎ note%*%T"
   end
   local head = #tally > 0 and ("THREAD " .. table.concat(tally, " ")) or "THREAD"
   if view.flash then
@@ -1536,15 +1537,7 @@ local function accent_of(item)
   return "Vimnotate" .. KINDS[item.kind].hl:sub(10) .. "Border" .. (item.sent and "Sent" or "")
 end
 
-local function bubble(item, width, edge, fit)
-  local kind = KINDS[item.kind]
-  local accent = accent_of(item)
-  local title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. (item.sent and " · sent " or " ")
-  local body = vim.trim(item.body)
-  local lines, text_hl = { kind.label }, "VimnotateLabel"
-  if body ~= "" then
-    lines, text_hl = wrap_text(body, width - 4), nil
-  end
+local function frame(title, accent, lines, text_hl, width, edge, fit)
   if fit then
     local w = dw(title) + 4
     for _, l in ipairs(lines) do
@@ -1563,13 +1556,58 @@ local function bubble(item, width, edge, fit)
   return rows
 end
 
+local function bubble(item, width, edge, fit)
+  local kind = KINDS[item.kind]
+  local title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. (item.sent and " · sent " or " ")
+  local body = vim.trim(item.body)
+  local lines, text_hl = { kind.label }, "VimnotateLabel"
+  if body ~= "" then
+    lines, text_hl = wrap_text(body, width - 4), nil
+  end
+  return frame(title, accent_of(item), lines, text_hl, width, edge, fit)
+end
+
+local function cut_rows(b, avail, width)
+  local cut = { b[1] }
+  for i = 2, avail - 2 do
+    cut[#cut + 1] = b[i]
+  end
+  local last = b[avail - 1]
+  cut[#cut + 1] = { last[1], { "…" .. string.rep(" ", width - 5), last[2][2] }, last[3] }
+  cut[#cut + 1] = b[#b]
+  return cut
+end
+
+local pin = { item = { id = "note", note = true }, max_rows = 6 }
+M.pin = pin
+
+function pin.on()
+  return view.mode == "rail" and note_text() ~= ""
+end
+
+function pin.bubble(width, height, edge)
+  local b = frame(" ✎ note ", "VimnotateCommentBorder", wrap_text(note_text(), width - 4), nil, width, edge, false)
+  local cap = math.min(pin.max_rows, math.max(3, math.floor(height / 2)))
+  if #b > cap then
+    b = cut_rows(b, cap, width)
+  end
+  return b
+end
+
 local function rail_valid()
   return view.rail_win ~= nil and vim.api.nvim_win_is_valid(view.rail_win)
 end
 
+function pin.valid(sel)
+  if sel == pin.item then
+    return pin.on()
+  end
+  return sel ~= nil and A.items[sel.id] ~= nil
+end
+
 local function selected_item()
   if view.focused then
-    return view.sel and A.items[view.sel.id] and view.sel or nil
+    return pin.valid(view.sel) and view.sel or nil
   end
   return A.at_cursor()
 end
@@ -1637,6 +1675,15 @@ local function rail_render()
   end
   local sel = selected_item()
   local rows, bubbles, next_y = {}, {}, -math.huge
+  local floor = 0
+  if pin.on() then
+    local nb = pin.bubble(width, height, sel == pin.item and "VimnotateCommentBorderBold" or "VimnotateEdge")
+    for i, row in ipairs(nb) do
+      rows[i] = row
+    end
+    floor = #nb
+    bubbles[1] = { item = pin.item, y0 = 0, y1 = floor - 1, whole = true }
+  end
   local marks = vim.api.nvim_buf_get_extmarks(thread, range_ns, { math.max(top - height, 0), 0 }, { bot, -1 }, {})
   for _, mk in ipairs(marks) do
     local item = by_mark[mk[1]]
@@ -1647,21 +1694,20 @@ local function rail_render()
       end
       local edge = item == sel and (accent_of(item) .. "Bold") or "VimnotateEdge"
       local b = bubble(item, width, edge, false)
+      if floor > 0 and y < floor and y + #b > 0 then
+        y = floor
+      end
+      if floor > 0 and y >= height then
+        break
+      end
       local whole = y >= 0 and y + #b <= height
       local avail = height - y
       if avail >= 3 and avail < #b then
-        local cut = { b[1] }
-        for i = 2, avail - 2 do
-          cut[#cut + 1] = b[i]
-        end
-        local last = b[avail - 1]
-        cut[#cut + 1] = { last[1], { "…" .. string.rep(" ", width - 5), last[2][2] }, last[3] }
-        cut[#cut + 1] = b[#b]
-        b = cut
+        b = cut_rows(b, avail, width)
       end
       for i, row in ipairs(b) do
         local ry = y + i - 1
-        if ry >= 0 and ry < height then
+        if ry >= floor and ry < height then
           rows[ry + 1] = row
         end
       end
@@ -1948,8 +1994,16 @@ local function bubble_of(item)
   return nil
 end
 
-function M.rail_move(delta)
+function pin.items()
   local items = A.list()
+  if pin.on() then
+    table.insert(items, 1, pin.item)
+  end
+  return items
+end
+
+function M.rail_move(delta)
+  local items = pin.items()
   if #items == 0 then
     return
   end
@@ -1957,7 +2011,7 @@ function M.rail_move(delta)
   view.sel = items[math.max(1, math.min(#items, idx + delta))]
   rail_render()
   local b = bubble_of(view.sel)
-  if not (b and b.whole) then
+  if view.sel ~= pin.item and not (b and b.whole) then
     local tw = thread_win()
     local r = A.range(view.sel)
     vim.api.nvim_win_call(tw, function()
@@ -1968,7 +2022,7 @@ function M.rail_move(delta)
 end
 
 function M.rail_edge(last)
-  local items = A.list()
+  local items = pin.items()
   if #items == 0 then
     return
   end
@@ -1982,6 +2036,10 @@ function M.rail_jump(item)
   if not item or tw == -1 then
     return
   end
+  if item == pin.item then
+    M.note_show()
+    return
+  end
   local r = A.range(item)
   vim.api.nvim_set_current_win(tw)
   vim.cmd("normal! m'")
@@ -1990,14 +2048,16 @@ end
 
 function M.rail_edit()
   local item = selected_item()
-  if item then
+  if item == pin.item then
+    M.note_show()
+  elseif item then
     M.compose({ item = item })
   end
 end
 
 function M.rail_remove()
   local item = selected_item()
-  if not item then
+  if not item or item == pin.item then
     return
   end
   local items = A.list()
@@ -2112,8 +2172,8 @@ local function rail_buffer()
     callback = function()
       view.focused = true
       bars_hide()
-      if not (view.sel and A.items[view.sel.id]) then
-        view.sel = A.at_cursor() or (view.bubbles[1] and view.bubbles[1].item) or A.list()[1]
+      if not pin.valid(view.sel) then
+        view.sel = A.at_cursor() or (view.bubbles[1] and view.bubbles[1].item) or pin.items()[1]
       end
       rail_render()
     end,
@@ -2316,14 +2376,22 @@ local NOTE_MIN_WIDTH = 40
 local NOTE_MAX_WIDTH = 100
 local NOTE_MIN_HEIGHT = 6
 local NOTE_MAX_HEIGHT = 24
-local NOTE_FOOTER = " sent above the annotations "
+M.NOTE_TITLES = {
+  insert = { "note · sent first · esc normal", "note · esc normal" },
+  normal = { "note · sent first · q/Tab close · i insert", "note · q/Tab close · i insert", "note · q/Tab close" },
+}
 
-local function note_title()
-  if note_shown() and vim.api.nvim_get_current_win() == note_win and vim.api.nvim_get_mode().mode:sub(1, 1) == "i" then
-    return " note · esc normal "
+local function note_title(width)
+  local insert = note_shown() and vim.api.nvim_get_current_win() == note_win and vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
+  local options = M.NOTE_TITLES[insert and "insert" or "normal"]
+  for _, t in ipairs(options) do
+    if dw(t) + 2 <= width then
+      return " " .. t .. " "
+    end
   end
-  return " note · q/Tab close · i insert "
+  return truncate(" " .. options[#options] .. " ", width)
 end
+M.note_title = note_title
 
 local function clamp(v, lo, hi)
   return math.max(lo, math.min(hi, v))
@@ -2339,10 +2407,8 @@ local function note_layout()
     height = height,
     row = math.max(0, math.floor((rows - height - 2) / 2)),
     col = math.max(0, math.floor((cols - width - 2) / 2)),
-    title = truncate(note_title(), width),
+    title = note_title(width),
     title_pos = "left",
-    footer = truncate(NOTE_FOOTER, width),
-    footer_pos = "right",
   }
 end
 M.note_layout = note_layout
@@ -2366,6 +2432,7 @@ function M.note_hide()
     vim.cmd("stopinsert")
   end
   refresh_winbar()
+  rail_render()
 end
 
 local function note_keys(buf)
@@ -2400,7 +2467,7 @@ function M.note_open()
   vim.wo[win].conceallevel = 2
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
-  vim.wo[win].winhighlight = "FloatBorder:VimnotateCommentBorder,FloatTitle:VimnotateTitle,FloatFooter:VimnotateTitle"
+  vim.wo[win].winhighlight = "FloatBorder:VimnotateCommentBorder,FloatTitle:VimnotateTitle"
   vim.api.nvim_set_current_win(win)
   if fresh then
     vim.cmd("edit " .. vim.fn.fnameescape(note_path))
@@ -2414,14 +2481,22 @@ function M.note_open()
     vim.bo[note_buf].bufhidden = "hide"
     note_keys(note_buf)
     hide_chrome()
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      group = vim.api.nvim_create_augroup("vimnotate.note_text", { clear = true }),
+      buffer = note_buf,
+      callback = function()
+        refresh_winbar()
+        rail_render()
+      end,
+    })
   end
   vim.wo[win].winfixbuf = true
   return win
 end
 
-function M.note_toggle()
+function M.note_show()
   if note_shown() then
-    M.note_hide()
+    vim.api.nvim_set_current_win(note_win)
     return
   end
   local win = M.note_open()
@@ -2433,6 +2508,20 @@ function M.note_toggle()
   vim.api.nvim_win_set_cursor(win, { last, math.max(#lines[last] - 1, 0) })
   if note_text() == "" then
     vim.cmd("startinsert!")
+  end
+end
+
+function M.note_toggle()
+  if note_shown() then
+    M.note_hide()
+  else
+    M.note_show()
+  end
+end
+
+function _G.vimnotate_note_click(_, _, button)
+  if button == "l" then
+    vim.schedule(M.note_show)
   end
 end
 
@@ -2477,7 +2566,7 @@ vim.api.nvim_create_autocmd("ModeChanged", {
   group = note_group,
   callback = function()
     if note_shown() then
-      vim.api.nvim_win_set_config(note_win, { title = truncate(note_title(), vim.api.nvim_win_get_width(note_win)), title_pos = "left" })
+      vim.api.nvim_win_set_config(note_win, { title = note_title(vim.api.nvim_win_get_width(note_win)), title_pos = "left" })
     end
   end,
 })
@@ -2494,7 +2583,10 @@ vim.api.nvim_create_autocmd("WinClosed", {
   callback = function(ev)
     if note_win and tonumber(ev.match) == note_win then
       note_win = nil
-      vim.schedule(refresh_winbar)
+      vim.schedule(function()
+        refresh_winbar()
+        rail_render()
+      end)
     end
   end,
 })

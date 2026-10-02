@@ -84,6 +84,11 @@ vn ops.txt "" note_cancel
 check '[ ! -e "$work/reply.md" ]' ":Cancel discards the note"
 vn ops.txt "" note_layout
 vn ops.txt "" note_focus
+vn ops.txt "" note_title_insert
+vn ops.txt "" note_marker
+vn ops.txt "" pin_rail
+vn ops.txt "" pin_alone
+vn ops.txt "" pin_nav
 vn ops.txt "" popup_undo
 mkdir -p "$work/undo"
 PRE="set undofile undodir=$work/undo" vn ops.txt "" no_undofile

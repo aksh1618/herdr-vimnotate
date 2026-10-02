@@ -90,6 +90,9 @@ vn ops.txt "" pin_rail
 vn ops.txt "" pin_alone
 vn ops.txt "" pin_nav
 vn ops.txt "" popup_undo
+vn ops.txt "" mouse_scrolloff_bar
+vn ops.txt "" mouse_scrolloff_plain
+vn ops.txt "" mouse_scrolloff_restore
 mkdir -p "$work/undo"
 PRE="set undofile undodir=$work/undo" vn ops.txt "" no_undofile
 check '[ -s "$work/reply.md" ] && [ -z "$(ls -A "$work/undo")" ]' "no undo file written"

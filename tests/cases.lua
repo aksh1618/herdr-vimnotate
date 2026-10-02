@@ -697,4 +697,70 @@ function C.pin_nav(V, A)
   T.finish("Cancel")
 end
 
+local function near_bottom(V, from)
+  local tw = V.thread_win()
+  local info = vim.fn.getwininfo(tw)[1]
+  local last = info.winrow + info.winbar + info.height - 2
+  for l = from, vim.api.nvim_buf_line_count(V.thread) do
+    local p = vim.fn.screenpos(tw, l, 1)
+    if p.row > 0 and p.row >= last - 2 then
+      return l - 1, p.row - 1
+    end
+  end
+end
+
+local function mouse_setup(V, boxes)
+  vim.o.scrolloff = 8
+  vim.g.vimnotate_view = "inline"
+  for _, r in ipairs(boxes) do
+    T.add(r, "comment", "box " .. r)
+  end
+  T.cursor(0)
+  vim.cmd("normal! zt")
+  V.apply_view()
+  vim.cmd("redraw")
+end
+
+local function mouse_drag(V, boxes, done)
+  mouse_setup(V, boxes)
+  local row, y = near_bottom(V, (boxes[#boxes] or 0) + 2)
+  local top = vim.fn.line("w0")
+  T.mouse({ { "press", y, 0 }, { "drag", y, 2 }, { "drag", y, 4 }, { "release", y, 4 } }, function()
+    T.eq({ vim.fn.mode(), vim.fn.getpos("v")[2] - 1, vim.fn.getpos(".")[2] - 1 }, { "v", row, row }, "drag on a row near the bottom selects that row")
+    T.eq(vim.fn.line("w0"), top, "the thread does not scroll under the mouse")
+    done(row)
+  end)
+end
+
+function C.mouse_scrolloff_bar(V)
+  mouse_drag(V, { 1, 3, 5 }, function(row)
+    local bar = V.bars.action
+    local pos = vim.api.nvim_win_get_position(bar.win)
+    local x = pos[2] + bar.spans[2].from + 2
+    T.mouse({ { "press", pos[1], x }, { "release", pos[1], x } }, function()
+      local c = V.composing()
+      T.eq(c and { c.range.srow, c.range.erow } or false, { row, row }, "comment from the action bar anchors on the selected row")
+      T.finish("Cancel")
+    end)
+  end)
+end
+
+function C.mouse_scrolloff_plain(V)
+  mouse_drag(V, {}, function()
+    T.finish("Cancel")
+  end)
+end
+
+function C.mouse_scrolloff_restore(V)
+  mouse_drag(V, { 1 }, function()
+    local tw = V.thread_win()
+    T.eq(vim.wo[tw].scrolloff, 0, "scrolloff held at 0 after a mouse selection")
+    vim.api.nvim_input("<Esc>")
+    vim.defer_fn(function()
+      T.eq(vim.wo[tw].scrolloff, 8, "the next key restores scrolloff")
+      T.finish("Cancel")
+    end, 30)
+  end)
+end
+
 return C

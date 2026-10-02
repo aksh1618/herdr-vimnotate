@@ -66,6 +66,24 @@ function T.keys(keys)
   vim.api.nvim_feedkeys(vim.keycode(keys), "mx", false)
 end
 
+function T.mouse(events, done)
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local e = events[i]
+    if not e then
+      return done()
+    end
+    if type(e) == "function" then
+      e()
+    else
+      vim.api.nvim_input_mouse("left", e[1], "", 0, e[2], e[3])
+    end
+    vim.defer_fn(nxt, 30)
+  end
+  vim.schedule(nxt)
+end
+
 function T.step()
   V.history.step = nil
 end

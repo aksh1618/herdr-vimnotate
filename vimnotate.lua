@@ -765,6 +765,14 @@ vim.on_key(function(_, typed)
   end
   local base = typed:sub(-3)
   local left = base == LEFT_PRESS or base == LEFT_DRAG or base == LEFT_RELEASE
+  local tw = thread_win()
+  if tw ~= -1 and left and bars.scrolloff == nil then
+    bars.scrolloff = vim.api.nvim_get_option_value("scrolloff", { scope = "local", win = tw })
+    vim.api.nvim_set_option_value("scrolloff", 0, { scope = "local", win = tw })
+  elseif tw ~= -1 and not left and bars.scrolloff ~= nil then
+    vim.api.nvim_set_option_value("scrolloff", bars.scrolloff, { scope = "local", win = tw })
+    bars.scrolloff = nil
+  end
   if swallow then
     if base == LEFT_DRAG then
       return ""

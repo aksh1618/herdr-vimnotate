@@ -212,6 +212,9 @@ local function define_highlights()
     vim.api.nvim_set_hl(0, "VimnotateBar" .. name, vim.tbl_extend("force", base, { bold = true, cterm = { bold = true } }))
     vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderBold", { fg = accent.fg, ctermfg = accent.ctermfg, bold = true, cterm = { bold = true } })
   end
+  vim.api.nvim_set_hl(0, "VimnotateCommentActive", { bg = "#878700", ctermbg = 100 })
+  vim.api.nvim_set_hl(0, "VimnotateGoodActive", { bg = "#008700", ctermbg = 28 })
+  vim.api.nvim_set_hl(0, "VimnotateDeleteActive", { bg = "#870000", ctermbg = 88, strikethrough = true, cterm = { strikethrough = true } })
   vim.api.nvim_set_hl(0, "VimnotateCommentSent", { bg = "#3a3a1c", ctermbg = 237 })
   vim.api.nvim_set_hl(0, "VimnotateGoodSent", { bg = "#1c3a1c", ctermbg = 237 })
   vim.api.nvim_set_hl(0, "VimnotateDeleteSent", { bg = "#3a1c1c", ctermbg = 237, strikethrough = true, cterm = { strikethrough = true } })
@@ -675,8 +678,8 @@ end
 M.BUFFER_SWITCHERS = { "]b", "[b", "]B", "[B", "]A", "[A", "<Space><Space>", "<C-^>", "<C-6>", "gf", "gF" }
 
 local TRIGGERS = {
-  n = { "c", "d", "p", "x", "e", "K", "u", "<C-r>", "<C-o>", "<C-i>", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
-  x = { "c", "d", "p", "<LeftMouse>" },
+  n = { "c", "C", "d", "p", "x", "e", "K", "u", "<C-r>", "<C-o>", "<C-i>", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
+  x = { "c", "C", "d", "p", "<LeftMouse>" },
   o = { "c", "d", "p" },
 }
 M.TRIGGERS = TRIGGERS
@@ -764,7 +767,7 @@ local COMPOSE_MAX_ROWS = 8
 local compose = nil
 
 local function compose_title(c, insert)
-  local verb = c.item and "edit" or "comment"
+  local verb = (c.item and c.item.kind == c.kind) and "edit" or "comment"
   if insert == nil then
     insert = vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
   end
@@ -1162,7 +1165,11 @@ local function compose_finish(save)
   if save then
     if c.item then
       if A.items[c.item.id] then
-        if body == "" and c.item.kind == "comment" then
+        if c.kind ~= c.item.kind then
+          if body ~= "" or c.kind ~= "comment" then
+            A.update(c.item.id, { body = body, kind = c.kind })
+          end
+        elseif body == "" and c.kind == "comment" then
           A.remove(c.item.id)
         else
           A.update(c.item.id, { body = body })
@@ -1203,18 +1210,17 @@ function M.compose(opts)
   bars_hide()
   local item = opts.item
   local r = item and A.range(item) or opts.range
-  local accent = KINDS[item and item.kind or "comment"]
-  local c = { item = item, range = r, height = 1 }
+  local c = { item = item, range = r, height = 1, kind = opts.kind or (item and item.kind) or "comment" }
+  local accent = KINDS[c.kind]
   c.inline = (item and view.mode or M.planned(thread_win())) == "inline"
-  if not item then
-    vim.api.nvim_buf_set_extmark(thread, pending_ns, r.srow, r.linewise and 0 or r.scol, {
-      end_row = r.erow,
-      end_col = r.linewise and line_len(r.erow) or r.ecol,
-      hl_group = "Visual",
-      hl_eol = r.linewise or nil,
-      priority = 4300,
-    })
-  end
+  local whole = r.linewise and r.erow + 1 < vim.api.nvim_buf_line_count(thread)
+  vim.api.nvim_buf_set_extmark(thread, pending_ns, r.srow, r.linewise and 0 or r.scol, {
+    end_row = whole and r.erow + 1 or r.erow,
+    end_col = whole and 0 or (r.linewise and line_len(r.erow) or r.ecol),
+    hl_group = accent.hl .. "Active",
+    hl_eol = r.linewise or nil,
+    priority = 4300,
+  })
   c.buf = vim.api.nvim_create_buf(false, true)
   vim.bo[c.buf].bufhidden = "wipe"
   local body = opts.body or (item and item.body) or ""
@@ -1359,18 +1365,38 @@ local function apply_op(kind, type)
     warn("nothing to annotate here")
     return
   end
+  local function same(item)
+    local o = A.range(item)
+    return o.linewise == r.linewise and o.srow == r.srow and o.erow == r.erow and (r.linewise or (o.scol == r.scol and o.ecol == r.ecol))
+  end
+  local rekind
+  for _, item in pairs(A.items) do
+    if same(item) then
+      if item.kind == kind then
+        rekind = nil
+        if kind ~= "comment" then
+          if item.sent then
+            A.update(item.id, { sent = false })
+          end
+          return
+        end
+        break
+      elseif item.sent then
+        rekind = item
+      end
+    end
+  end
+  if rekind then
+    if kind == "comment" then
+      M.compose({ item = rekind, kind = kind })
+    else
+      A.update(rekind.id, { kind = kind })
+    end
+    return
+  end
   if kind == "comment" then
     M.compose({ range = r, body = (not was_fresh) and M.last_body or nil })
     return
-  end
-  for _, item in pairs(A.items) do
-    local o = A.range(item)
-    if item.kind == kind and o.linewise == r.linewise and o.srow == r.srow and o.erow == r.erow and (r.linewise or (o.scol == r.scol and o.ecol == r.ecol)) then
-      if item.sent then
-        A.update(item.id, { sent = false })
-      end
-      return
-    end
   end
   r.kind = kind
   A.add(r)
@@ -1460,7 +1486,7 @@ function M.hover()
   local lines = body ~= "" and vim.split(body, "\n", { plain = true }) or { "_(no note)_" }
   vim.lsp.util.open_floating_preview(lines, "markdown", {
     border = "rounded",
-    title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. " · " .. kind.label .. " ",
+    title = " " .. kind.glyph .. " " .. A.short_id(item.id) .. " · " .. kind.label .. (item.sent and " · sent " or " "),
     focus_id = "vimnotate_hover",
     max_width = 60,
   })
@@ -1808,7 +1834,7 @@ function M.compose_layout(c)
   local rows = c.height + 2
   if c.inline and c.buf and vim.api.nvim_buf_is_valid(c.buf) then
     local preview = {
-      kind = c.item and c.item.kind or "comment",
+      kind = c.kind,
       id = c.item and c.item.id or "anno_00000",
       body = table.concat(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false), "\n"),
     }
@@ -2331,17 +2357,16 @@ M.rail_scrub = function()
   end
 end
 
-local function fenced(text)
-  local longest = 0
-  for run in text:gmatch("`+") do
-    longest = math.max(longest, #run)
+local function quote_lines(lines)
+  local out = {}
+  for i, l in ipairs(lines) do
+    out[i] = ("> " .. l):gsub("%s+$", "")
   end
-  local fence = string.rep("`", math.max(longest, 2) + 1)
-  return fence .. "\n" .. text .. "\n" .. fence
+  return table.concat(out, "\n")
 end
 
-local function quote_lines(text)
-  return "> " .. text:gsub("\n", "\n> ")
+local function reply_text(body)
+  return (body:gsub("^(%s*)>", "%1\\>"):gsub("\n(%s*)>", "\n%1\\>"))
 end
 
 function M.export()
@@ -2356,23 +2381,18 @@ function M.export()
     return not item.sent
   end, A.list())
   for _, item in ipairs(items) do
-    local quoted = table.concat(A.text(item), "\n")
-    local body = vim.trim(item.body)
-    local out = {}
+    local body = reply_text(vim.trim(item.body))
+    local reply = body
     if item.kind == "delete" then
-      out[#out + 1] = "Remove this:"
-      out[#out + 1] = fenced(quoted)
-      out[#out + 1] = quote_lines(body ~= "" and body or "I don't want this.")
+      reply = body == "" and "Remove this." or body:find("\n") and ("Remove this.\n" .. body) or ("Remove this. " .. body)
     elseif item.kind == "good" then
-      out[#out + 1] = 'Looks good: "' .. single_line(quoted) .. '"'
-      if body ~= "" then
-        out[#out + 1] = quote_lines(body)
-      end
-    else
-      out[#out + 1] = 'Comment on: "' .. single_line(quoted) .. '"'
-      out[#out + 1] = quote_lines(body)
+      reply = body == "" and "Looks good." or ("Looks good.\n" .. body)
     end
-    parts[#parts + 1] = table.concat(out, "\n")
+    local block = quote_lines(A.text(item))
+    if reply ~= "" then
+      block = block .. "\n\n" .. reply
+    end
+    parts[#parts + 1] = block
   end
   return table.concat(parts, "\n\n")
 end
@@ -2560,18 +2580,35 @@ vim.keymap.set("n", "c", operator("comment"), ebo)
 vim.keymap.set("n", "d", operator("delete"), ebo)
 vim.keymap.set("n", "p", operator("good"), ebo)
 vim.keymap.set("n", "cw", operator("comment", "w"), ebo)
+vim.keymap.set("n", "C", operator("comment", "_"), ebo)
 vim.keymap.set("x", "c", operator("comment"), ebo)
+vim.keymap.set("x", "C", operator("comment"), ebo)
 vim.keymap.set("x", "d", operator("delete"), ebo)
 vim.keymap.set("x", "p", operator("good"), ebo)
 vim.keymap.set("o", "c", line_motion("comment", "c"), ebo)
 vim.keymap.set("o", "d", line_motion("delete", "d"), ebo)
 vim.keymap.set("o", "p", line_motion("good", "p"), ebo)
-vim.keymap.set("n", "]a", function()
-  M.jump(1, vim.v.count1)
-end, bo)
-vim.keymap.set("n", "[a", function()
-  M.jump(-1, vim.v.count1)
-end, bo)
+local repeatable_jump = nil
+local function jump_key(dir)
+  return function()
+    if repeatable_jump == nil then
+      repeatable_jump = false
+      local ok, rm = pcall(require, "nvim-treesitter-textobjects.repeatable_move")
+      if ok and type(rm) == "table" and type(rm.make_repeatable_move) == "function" then
+        repeatable_jump = rm.make_repeatable_move(function(opts)
+          M.jump(opts.forward and 1 or -1, vim.v.count1)
+        end)
+      end
+    end
+    if repeatable_jump then
+      repeatable_jump({ forward = dir > 0 })
+    else
+      M.jump(dir, vim.v.count1)
+    end
+  end
+end
+vim.keymap.set("n", "]a", jump_key(1), bo)
+vim.keymap.set("n", "[a", jump_key(-1), bo)
 vim.keymap.set("n", "K", M.hover, bo)
 vim.keymap.set("n", "u", function()
   M.undo()

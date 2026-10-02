@@ -27,7 +27,8 @@ lines="${VIMNOTATE_LINES:-1000}"
 dir="$(mktemp -d "${TMPDIR:-/tmp}/herdr-vimnotate.XXXXXX")"
 "$herdr" pane read "$pane" --source visible --format ansi >"$dir/visible.ansi" 2>/dev/null || true
 "$herdr" pane read "$pane" --source recent-unwrapped --format ansi --lines "$lines" >"$dir/thread.ansi" 2>/dev/null \
-  || "$herdr" pane read "$pane" --source recent --format ansi --lines "$lines" >"$dir/thread.ansi"
+  || "$herdr" pane read "$pane" --source recent --format ansi --lines "$lines" >"$dir/thread.ansi" \
+  || { rm -rf "$dir"; exit 1; }
 printf '%s' "$ctx" | jq -r '.selected_text // empty' >"$dir/selected.txt"
 resp="$("$herdr" plugin pane open --plugin "${HERDR_PLUGIN_ID:?}" --entrypoint vimnotate --placement tab --workspace "$workspace" --no-focus \
   --env "VIMNOTATE_DIR=$dir" --env "VIMNOTATE_TARGET_PANE=$pane" --env "VIMNOTATE_TAB=$tab")" || { rm -rf "$dir"; exit 1; }

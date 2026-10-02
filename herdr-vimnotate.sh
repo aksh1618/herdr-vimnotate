@@ -64,7 +64,7 @@ if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$re
 fi
 empty=false
 if "$herdr" pane read "$pane" --source visible 2>/dev/null \
-  | awk '/^─(.*─)?[[:space:]]*$/ { above = below; below = NR } { line[NR] = $0 } END { exit !(below && above && below == above + 2 && line[above + 1] ~ /^❯[[:space:]]*$/) }'; then
+  | awk -f "$script_dir/composer-empty.awk"; then
   empty=true
 fi
 resp="$(jq -Rsc --arg pane "$pane" --argjson empty "$empty" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if $empty then "" elif test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"

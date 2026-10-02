@@ -60,7 +60,7 @@ if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$re
   "$herdr" notification show "Annotations copied to clipboard" --body "pane $pane has no agent; multi-line reply not auto-sent" --sound none || true
   exit 0
 fi
-resp="$(jq -Rsc --arg pane "$pane" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(.|rtrimstr("\n")),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
+resp="$(jq -Rsc --arg pane "$pane" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
 if ! printf '%s' "$resp" | grep -q '"type":"ok"'; then
   clip <"$reply" || true
   "$herdr" notification show "Annotation send failed — copied to clipboard" --body "$resp" --sound none || true

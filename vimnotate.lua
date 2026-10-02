@@ -163,9 +163,11 @@ local function scrub_win(win)
   vim.wo[win].statuscolumn = ""
   vim.wo[win].colorcolumn = ""
   vim.wo[win].fillchars = "eob: "
+  vim.wo[win].winfixbuf = vim.v.vim_did_enter == 1
 end
 scrub_win(vim.api.nvim_get_current_win())
 vim.cmd("normal! G")
+vim.cmd("clearjumps")
 
 local function thread_win()
   return vim.fn.bufwinid(thread)
@@ -311,11 +313,54 @@ function A.text(item)
   return lines
 end
 
+local H = { undo = {}, redo = {}, step = nil, muted = false }
+M.history = H
+
+vim.on_key(function()
+  H.step = nil
+end, vim.api.nvim_create_namespace("vimnotate.history"))
+
+local function snapshot(item)
+  local r = A.range(item)
+  return {
+    id = item.id,
+    kind = item.kind,
+    linewise = item.linewise,
+    body = item.body,
+    seq = item.seq,
+    srow = r.srow,
+    scol = r.scol,
+    erow = r.erow,
+    ecol = r.ecol,
+  }
+end
+
+local function record(op)
+  if H.muted then
+    return
+  end
+  if not H.step then
+    H.step = {}
+    H.undo[#H.undo + 1] = H.step
+    H.redo = {}
+  end
+  table.insert(H.step, op)
+end
+
+local function revive(s)
+  local item = { id = s.id, kind = s.kind, linewise = s.linewise, body = s.body, seq = s.seq }
+  place(item, s)
+  A.items[item.id] = item
+  emit("add", item)
+  return item
+end
+
 function A.add(spec)
   seq = seq + 1
   local item = { id = new_id(), kind = spec.kind, linewise = spec.linewise or false, body = spec.body or "", seq = seq }
   place(item, spec)
   A.items[item.id] = item
+  record({ op = "add", snap = snapshot(item) })
   emit("add", item)
   return item
 end
@@ -329,12 +374,17 @@ function A.update(id, fields)
   if not item then
     return nil
   end
+  local old = { body = item.body, kind = item.kind }
   if fields.body ~= nil then
     item.body = fields.body
   end
   if fields.kind and fields.kind ~= item.kind then
     item.kind = fields.kind
     place(item, A.range(item))
+  end
+  local new = { body = item.body, kind = item.kind }
+  if not vim.deep_equal(old, new) then
+    record({ op = "update", id = id, before = old, after = new })
   end
   emit("update", item)
   return item
@@ -345,6 +395,7 @@ function A.remove(id)
   if not item then
     return nil
   end
+  record({ op = "remove", snap = snapshot(item) })
   vim.api.nvim_buf_del_extmark(thread, range_ns, item.mark)
   vim.api.nvim_buf_del_extmark(thread, mark_ns, item.tag)
   A.items[id] = nil
@@ -424,6 +475,75 @@ function A.describe(item)
   return kind.glyph .. " " .. A.short_id(item.id) .. " " .. kind.label .. ": " .. detail
 end
 
+local VERBS = { add = "added", remove = "removed", update = "edited" }
+
+local function replay(dir)
+  local from, to = dir < 0 and H.undo or H.redo, dir < 0 and H.redo or H.undo
+  local step = table.remove(from)
+  if not step then
+    M.flash(dir < 0 and "nothing to undo" or "nothing to redo")
+    return false
+  end
+  H.muted = true
+  local touched
+  local ok, err = pcall(function()
+    local first, last, inc = 1, #step, 1
+    if dir < 0 then
+      first, last, inc = #step, 1, -1
+    end
+    for i = first, last, inc do
+      local o = step[i]
+      local id = o.snap and o.snap.id or o.id
+      local add = (o.op == "add") == (dir > 0)
+      if o.op == "update" then
+        A.update(id, dir < 0 and o.before or o.after)
+      elseif add then
+        revive(o.snap)
+      else
+        A.remove(id)
+      end
+      touched = touched or A.items[id] or o.snap
+    end
+  end)
+  H.muted = false
+  H.step = nil
+  to[#to + 1] = step
+  if not ok then
+    warn("vimnotate history: " .. tostring(err))
+    return false
+  end
+  local o = step[1]
+  local id = o.snap and o.snap.id or o.id
+  local kind = KINDS[(touched and touched.kind) or "comment"]
+  local msg = (dir < 0 and "undid: " or "redid: ") .. VERBS[o.op] .. " " .. kind.label .. " " .. A.short_id(id)
+  if #step > 1 then
+    msg = msg .. " (+" .. (#step - 1) .. ")"
+  end
+  local tw = vim.fn.bufwinid(thread)
+  if touched and tw ~= -1 then
+    local r = touched.srow and touched or A.range(touched)
+    vim.api.nvim_win_set_cursor(tw, { r.srow + 1, r.linewise and 0 or r.scol })
+  end
+  M.flash(msg)
+  return true
+end
+
+function M.undo(count)
+  for _ = 1, count or vim.v.count1 do
+    if not replay(-1) then
+      return
+    end
+  end
+end
+
+function M.redo(count)
+  for _ = 1, count or vim.v.count1 do
+    if not replay(1) then
+      return
+    end
+  end
+end
+
 local function refresh_loclist()
   local tw = thread_win()
   if tw == -1 then
@@ -444,7 +564,7 @@ local function refresh_loclist()
   vim.fn.setloclist(tw, {}, "r", { title = "vimnotate annotations", items = items })
 end
 
-local HINTS = "c d + {motion} comment/delete/good · ]a [a · K show · e edit · x drop · R view · Tab note · q send"
+local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x drop · R toggle view · Tab note · q send"
 local NOTE_HINTS = "general note, sent above the annotations · Tab thread · :qa send · :Cancel discard"
 
 local function thread_winbar()
@@ -528,10 +648,12 @@ local function unshadow(mode, lhs)
   end
 end
 
+M.BUFFER_SWITCHERS = { "]b", "[b", "]B", "[B", "]A", "[A", "<Space><Space>", "<C-^>", "<C-6>", "gf", "gF" }
+
 local TRIGGERS = {
-  n = { "c", "d", "+", "a", "x", "e", "K", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
-  x = { "c", "d", "+", "a", "<CR>", "<LeftMouse>" },
-  o = { "c", "d", "+" },
+  n = { "c", "d", "p", "x", "e", "K", "u", "<C-r>", "<C-o>", "<C-i>", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
+  x = { "c", "d", "p", "<LeftMouse>" },
+  o = { "c", "d", "p" },
 }
 M.TRIGGERS = TRIGGERS
 
@@ -543,6 +665,12 @@ local function unshadow_triggers()
   end
 end
 M.unshadow_triggers = unshadow_triggers
+vim.api.nvim_create_autocmd("User", {
+  pattern = "LazyLoad",
+  callback = function()
+    vim.schedule(unshadow_triggers)
+  end,
+})
 
 local function ensure_note()
   local win = note_win()
@@ -551,6 +679,7 @@ local function ensure_note()
   end
   local cur = vim.api.nvim_get_current_win()
   vim.cmd("topleft 10split")
+  vim.wo.winfixbuf = false
   vim.wo.conceallevel = 2
   vim.cmd("edit " .. vim.fn.fnameescape(note_path))
   note_buf = vim.api.nvim_get_current_buf()
@@ -616,34 +745,12 @@ local function compose_body(c)
   return vim.trim(table.concat(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false), "\n"))
 end
 
-local function float_config(r, width, height)
-  local tw = thread_win()
-  local info = vim.fn.getwininfo(tw)[1]
-  local top = info.winrow + (info.winbar or 0)
-  width = math.max(1, math.min(width, info.width - 2))
-  local scol = r.linewise and 0 or r.scol
-  local sp = vim.fn.screenpos(tw, r.srow + 1, scol + 1)
-  local x = sp.col > 0 and (sp.col - info.wincol) or 0
-  x = math.max(0, math.min(x, info.width - width - 2))
-  local cfg = { relative = "win", win = tw, width = width, height = height }
-  if sp.row > 0 and sp.row - top >= height + 2 then
-    cfg.bufpos = { r.srow, scol }
-    cfg.anchor = "SW"
-    cfg.row = 0
-    cfg.col = x - (sp.col - info.wincol)
-  else
-    local ecol = r.linewise and math.max(line_len(r.erow) - 1, 0) or math.max(r.ecol - 1, 0)
-    local ep = vim.fn.screenpos(tw, r.erow + 1, ecol + 1)
-    cfg.bufpos = { r.erow, ecol }
-    cfg.anchor = "NW"
-    cfg.row = 1
-    cfg.col = ep.col > 0 and (x - (ep.col - info.wincol)) or x
-  end
-  return cfg
+function M.composing()
+  return compose
 end
 
 local BAR_ACTIONS = {
-  { kind = "good", label = "looks good", key = "+" },
+  { kind = "good", label = "looks good", key = "p" },
   { kind = "comment", label = "comment", key = "c" },
   { kind = "delete", label = "delete", key = "d" },
 }
@@ -1001,12 +1108,12 @@ local function compose_resize(c)
     return
   end
   local h = vim.api.nvim_win_text_height(c.win, {}).all
-  h = math.max(1, math.min(h, COMPOSE_MAX_ROWS))
-  if h ~= c.height then
-    c.height = h
-    local cfg = float_config(c.range, c.width, h)
-    cfg.title = compose_title(c)
-    cfg.title_pos = "left"
+  c.height = math.max(1, math.min(h, COMPOSE_MAX_ROWS))
+  local cfg = M.compose_layout(c)
+  cfg.title = compose_title(c)
+  cfg.title_pos = "left"
+  if not vim.deep_equal(cfg, c.cfg) then
+    c.cfg = cfg
     vim.api.nvim_win_set_config(c.win, cfg)
   end
 end
@@ -1019,9 +1126,6 @@ local function compose_finish(save)
   compose = nil
   vim.api.nvim_buf_clear_namespace(thread, pending_ns, 0, -1)
   local body = vim.api.nvim_buf_is_valid(c.buf) and compose_body(c) or ""
-  if vim.api.nvim_win_is_valid(c.win) then
-    vim.api.nvim_win_close(c.win, true)
-  end
   if save then
     if c.item then
       if A.items[c.item.id] then
@@ -1038,6 +1142,10 @@ local function compose_finish(save)
       A.add(spec)
       M.last_body = body
     end
+  end
+  M.apply_view()
+  if vim.api.nvim_win_is_valid(c.win) then
+    vim.api.nvim_win_close(c.win, true)
   end
   local tw = thread_win()
   if tw ~= -1 then
@@ -1064,6 +1172,7 @@ function M.compose(opts)
   local r = item and A.range(item) or opts.range
   local accent = KINDS[item and item.kind or "comment"]
   local c = { item = item, range = r, height = 1 }
+  c.inline = (item and view.mode or M.planned(thread_win())) == "inline"
   if not item then
     vim.api.nvim_buf_set_extmark(thread, pending_ns, r.srow, r.linewise and 0 or r.scol, {
       end_row = r.erow,
@@ -1079,8 +1188,8 @@ function M.compose(opts)
   vim.api.nvim_buf_set_lines(c.buf, 0, -1, false, vim.split(body, "\n", { plain = true }))
   compose = c
   local title = compose_title(c, true)
-  c.width = math.max(COMPOSE_MIN_WIDTH, vim.fn.strdisplaywidth(title) + 2, vim.fn.strdisplaywidth(compose_title(c, false)) + 2)
-  local cfg = float_config(r, c.width, 1)
+  c.base_width = math.max(COMPOSE_MIN_WIDTH, vim.fn.strdisplaywidth(title) + 2, vim.fn.strdisplaywidth(compose_title(c, false)) + 2)
+  local cfg = M.compose_layout(c)
   cfg.border = "rounded"
   cfg.style = "minimal"
   cfg.title = title
@@ -1090,6 +1199,8 @@ function M.compose(opts)
   markdown_warm = true
   vim.bo[c.buf].filetype = "markdown"
   vim.wo[c.win].wrap = true
+  vim.wo[c.win].linebreak = c.inline
+  vim.wo[c.win].winfixbuf = false
   vim.wo[c.win].winhighlight = "FloatBorder:" .. accent.hl .. "Border,FloatTitle:VimnotateTitle"
   local o = { buffer = c.buf, nowait = true }
   vim.keymap.set("i", "<CR>", "<Esc><Cmd>lua require('vimnotate').compose_save()<CR>", o)
@@ -1271,6 +1382,9 @@ function M.jump(dir, count)
     return
   end
   local tw = thread_win()
+  vim.api.nvim_win_call(tw, function()
+    vim.cmd("normal! m'")
+  end)
   for _ = 1, count or 1 do
     local cur = vim.api.nvim_win_get_cursor(tw)
     local pos = { srow = cur[1] - 1, scol = cur[2] }
@@ -1560,23 +1674,53 @@ local function rail_render()
 end
 M.rail_render = rail_render
 
+local function box_width(info)
+  return math.max(info.width - info.textoff - INLINE_INDENT, 12)
+end
+
 local function inline_render()
   vim.api.nvim_buf_clear_namespace(thread, inline_ns, 0, -1)
   local tw = thread_win()
   if tw == -1 then
     return
   end
-  local info = vim.fn.getwininfo(tw)[1]
-  local width = math.max(info.width - info.textoff - INLINE_INDENT, 12)
+  local width = box_width(vim.fn.getwininfo(tw)[1])
+  local c = M.composing()
+  local entries = {}
+  if view.mode == "inline" then
+    for _, item in ipairs(A.list()) do
+      if not (c and c.item == item) then
+        entries[#entries + 1] = { item = item, r = A.range(item), seq = item.seq }
+      end
+    end
+  end
+  if c and c.rows then
+    local slot = { r = c.range, seq = c.item and c.item.seq or math.huge }
+    local at = #entries + 1
+    for i, e in ipairs(entries) do
+      if before(slot.r, e.r) or (not before(e.r, slot.r) and slot.seq < e.seq) then
+        at = i
+        break
+      end
+    end
+    table.insert(entries, at, slot)
+  end
   local sel = A.at_cursor()
   local groups = {}
-  for _, item in ipairs(A.list()) do
-    local erow = A.range(item).erow
+  for _, e in ipairs(entries) do
+    local erow = e.r.erow
     groups[erow] = groups[erow] or {}
-    local edge = accent_of(item) .. (item == sel and "Bold" or "")
-    for _, row in ipairs(bubble(item, width, edge, true)) do
-      table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
-      table.insert(groups[erow], row)
+    if e.item then
+      local edge = accent_of(e.item) .. (e.item == sel and "Bold" or "")
+      for _, row in ipairs(bubble(e.item, width, edge, true)) do
+        table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
+        table.insert(groups[erow], row)
+      end
+    else
+      c.offset = #groups[erow]
+      for _ = 1, c.rows do
+        table.insert(groups[erow], { { " " } })
+      end
     end
   end
   for erow, vl in pairs(groups) do
@@ -1587,19 +1731,85 @@ end
 M.inline_render = inline_render
 
 local function render_view()
+  inline_render()
   if view.mode == "rail" then
     rail_render()
-  elseif view.mode == "inline" then
-    inline_render()
   end
+end
+
+local function reveal(tw, c)
+  local r = c.range
+  local height = vim.fn.getwininfo(tw)[1].height
+  local sv = vim.api.nvim_win_call(tw, vim.fn.winsaveview)
+  local top = sv.topline - 1
+  local extra = (c.offset or 0) + c.rows
+  if r.erow < top then
+    top = r.srow
+  end
+  local function used(t)
+    return vim.api.nvim_win_text_height(tw, { start_row = t, end_row = r.erow }).all + extra
+  end
+  while top < r.erow and used(top) > height do
+    top = top + 1
+  end
+  if top ~= sv.topline - 1 then
+    vim.api.nvim_win_call(tw, function()
+      vim.fn.winrestview({ topline = top + 1, skipcol = 0 })
+    end)
+  end
+end
+
+function M.compose_layout(c)
+  local tw = thread_win()
+  local info = vim.fn.getwininfo(tw)[1]
+  local r = c.range
+  local maxw = box_width(info)
+  if c.inline then
+    c.width = math.max(1, maxw - 4)
+  else
+    c.width = math.max(1, math.min(c.base_width, info.width - 2))
+  end
+  local rows = c.height + 2
+  if c.inline and c.buf and vim.api.nvim_buf_is_valid(c.buf) then
+    local preview = {
+      kind = c.item and c.item.kind or "comment",
+      id = c.item and c.item.id or "anno_00000",
+      body = table.concat(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false), "\n"),
+    }
+    rows = math.max(rows, #bubble(preview, maxw, "VimnotateEdge", true))
+  end
+  c.rows = rows
+  render_view()
+  reveal(tw, c)
+  info = vim.fn.getwininfo(tw)[1]
+  local ecol = r.linewise and math.max(line_len(r.erow) - 1, 0) or math.max(r.ecol - 1, 0)
+  local ep = vim.fn.screenpos(tw, r.erow + 1, ecol + 1)
+  local x
+  if c.inline then
+    x = info.textoff + INLINE_INDENT + 1
+  else
+    local sp = vim.fn.screenpos(tw, r.srow + 1, (r.linewise and 0 or r.scol) + 1)
+    x = sp.col > 0 and (sp.col - info.wincol) or 0
+  end
+  x = math.max(0, math.min(x, info.width - c.width - 2))
+  return {
+    relative = "win",
+    win = tw,
+    width = c.width,
+    height = c.height,
+    bufpos = { r.erow, ecol },
+    anchor = "NW",
+    row = 1 + (c.offset or 0),
+    col = ep.col > 0 and (x - (ep.col - info.wincol)) or x,
+  }
 end
 
 local function view_setting()
   local v = vim.g.vimnotate_view
-  if v == "rail" or v == "inline" or v == "off" then
+  if v == "rail" or v == "auto" or v == "off" then
     return v
   end
-  return "auto"
+  return "inline"
 end
 
 local function rail_width(total)
@@ -1619,7 +1829,7 @@ local function rail_fits(tw, min)
   return total - rail_width(total) - 1 >= min
 end
 
-local function wanted(tw)
+local function planned(tw)
   local s = view_setting()
   if s == "off" or s == "inline" then
     return s
@@ -1628,6 +1838,24 @@ local function wanted(tw)
     return "rail"
   end
   return "inline"
+end
+M.planned = planned
+
+local function wanted(tw)
+  if next(A.items) == nil then
+    return "off"
+  end
+  return planned(tw)
+end
+
+function M.jumplist(dir, count)
+  local tw = thread_win()
+  if tw == -1 then
+    return
+  end
+  vim.api.nvim_win_call(tw, function()
+    pcall(vim.cmd, "normal! " .. (count or 1) .. (dir < 0 and "\15" or "\t"))
+  end)
 end
 
 local function scroll_thread(n)
@@ -1739,6 +1967,7 @@ function M.rail_jump(item)
   end
   local r = A.range(item)
   vim.api.nvim_set_current_win(tw)
+  vim.cmd("normal! m'")
   vim.api.nvim_win_set_cursor(tw, { r.srow + 1, r.linewise and 0 or r.scol })
 end
 
@@ -1813,6 +2042,22 @@ local function rail_buffer()
     M.cycle_view()
   end, o)
   vim.keymap.set("n", "q", "<Cmd>qa<CR>", o)
+  vim.keymap.set("n", "u", function()
+    M.undo()
+  end, o)
+  vim.keymap.set("n", "<C-r>", function()
+    M.redo()
+  end, o)
+  for _, s in ipairs({ { "<C-o>", -1 }, { "<C-i>", 1 } }) do
+    vim.keymap.set("n", s[1], function()
+      local n = vim.v.count1
+      back_to_thread()
+      M.jumplist(s[2], n)
+    end, o)
+  end
+  for _, lhs in ipairs(M.BUFFER_SWITCHERS) do
+    vim.keymap.set("n", lhs, "<Nop>", o)
+  end
   for _, lhs in ipairs({ "<Esc>", "h", "<S-Tab>", "<Tab>" }) do
     vim.keymap.set("n", lhs, back_to_thread, o)
   end
@@ -1918,11 +2163,11 @@ local function apply_view()
   if want ~= "rail" then
     rail_close()
   end
-  if want ~= "inline" then
-    vim.api.nvim_buf_clear_namespace(thread, inline_ns, 0, -1)
-  end
   view.mode = want
-  if want == "rail" then
+  if want == "rail" and not rail_valid() then
+    rail_open(tw)
+    vim.schedule(render_view)
+  elseif want == "rail" then
     rail_open(tw)
   end
   render_view()
@@ -1942,16 +2187,21 @@ local function flash(text)
     end
   end, FLASH_MS)
 end
+M.flash = flash
 
 function M.cycle_view()
   local tw = thread_win()
   if tw == -1 then
     return
   end
-  local order = { "rail", "inline", "off" }
+  local order = { "inline", "rail", "off" }
+  local cur = view_setting()
+  if cur == "auto" then
+    cur = planned(tw)
+  end
   local idx = 3
   for i, v in ipairs(order) do
-    if v == view.mode then
+    if v == cur then
       idx = i
     end
   end
@@ -1966,7 +2216,11 @@ function M.cycle_view()
   vim.g.vimnotate_view = nxt
   back_to_thread()
   apply_view()
-  flash("view: " .. nxt .. (nxt == "rail" and " (S-Tab focus)" or ""))
+  local note = nxt == "rail" and " (S-Tab focus)" or ""
+  if nxt ~= "off" and next(A.items) == nil then
+    note = " (shown with the first annotation)"
+  end
+  flash("view: " .. nxt .. note)
 end
 
 local view_group = vim.api.nvim_create_augroup("vimnotate.view", { clear = true })
@@ -2032,7 +2286,7 @@ vim.api.nvim_create_autocmd("WinClosed", {
   end,
 })
 A.on_change(function()
-  vim.schedule(render_view)
+  vim.schedule(apply_view)
 end)
 M.wheel = wheel
 M.rail_scrub = function()
@@ -2122,16 +2376,14 @@ local bo = { buffer = thread, nowait = true }
 local ebo = { buffer = thread, nowait = true, expr = true }
 vim.keymap.set("n", "c", operator("comment"), ebo)
 vim.keymap.set("n", "d", operator("delete"), ebo)
-vim.keymap.set("n", "+", operator("good"), ebo)
-vim.keymap.set("n", "a", operator("comment", "_"), ebo)
+vim.keymap.set("n", "p", operator("good"), ebo)
+vim.keymap.set("n", "cw", operator("comment", "w"), ebo)
 vim.keymap.set("x", "c", operator("comment"), ebo)
 vim.keymap.set("x", "d", operator("delete"), ebo)
-vim.keymap.set("x", "+", operator("good"), ebo)
-vim.keymap.set("x", "a", operator("comment"), ebo)
-vim.keymap.set("x", "<CR>", operator("comment"), ebo)
+vim.keymap.set("x", "p", operator("good"), ebo)
 vim.keymap.set("o", "c", line_motion("comment", "c"), ebo)
 vim.keymap.set("o", "d", line_motion("delete", "d"), ebo)
-vim.keymap.set("o", "+", line_motion("good", "+"), ebo)
+vim.keymap.set("o", "p", line_motion("good", "p"), ebo)
 vim.keymap.set("n", "]a", function()
   M.jump(1, vim.v.count1)
 end, bo)
@@ -2139,6 +2391,21 @@ vim.keymap.set("n", "[a", function()
   M.jump(-1, vim.v.count1)
 end, bo)
 vim.keymap.set("n", "K", M.hover, bo)
+vim.keymap.set("n", "u", function()
+  M.undo()
+end, bo)
+vim.keymap.set("n", "<C-r>", function()
+  M.redo()
+end, bo)
+vim.keymap.set("n", "<C-o>", function()
+  M.jumplist(-1, vim.v.count1)
+end, bo)
+vim.keymap.set("n", "<C-i>", function()
+  M.jumplist(1, vim.v.count1)
+end, bo)
+for _, lhs in ipairs(M.BUFFER_SWITCHERS) do
+  vim.keymap.set("n", lhs, "<Nop>", bo)
+end
 vim.keymap.set("n", "e", M.edit, bo)
 vim.keymap.set("n", "x", M.remove_at_cursor, bo)
 vim.keymap.set("n", "q", "<Cmd>qa<CR>", bo)
@@ -2201,6 +2468,7 @@ if selected_path and selected_path ~= "" then
       local r = find_in_thread(selected)
       if r then
         anchored = true
+        vim.cmd("normal! m'")
         vim.api.nvim_win_set_cursor(0, { r.srow + 1, r.scol })
         vim.cmd("normal! zz")
         M.compose({ range = r })

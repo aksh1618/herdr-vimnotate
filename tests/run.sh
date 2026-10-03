@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+unset HERDR_PLUGIN_CONFIG_DIR HERDR_PLUGIN_STATE_DIR VIMNOTATE_VIEW VIMNOTATE_ACTION_BAR VIMNOTATE_RESTORE
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 plugin="$(dirname "$here")"
 fx="$here/fixtures"
@@ -53,7 +54,7 @@ printf 'not json' >"$st/c2.json"
 vn rep_a.txt "$st/c2.json" corrupt_unversioned
 printf '{"version":1,"server":"srvA","pane":"p1","items":[null,5,"x",{"text":"Now the tests.","kind":"good","linewise":true},{"kind":"bogus","text":"Done."}]}' >"$st/c3.json"
 vn rep_a.txt "$st/c3.json" corrupt_entries
-for _ in 1 2 3; do PRE='let g:vimnotate_restore = v:false' vn rep_a.txt "$st/off.json" off_add; done
+for _ in 1 2 3; do VIMNOTATE_RESTORE=false vn rep_a.txt "$st/off.json" off_add; done
 vn rep_a.txt "$st/off.json" off_count
 SERVER=srvB vn rep_a.txt "$st/rep.json" server_mismatch
 vn rep_a.txt "$st/rep.json" rep_same

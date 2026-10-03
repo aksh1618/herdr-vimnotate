@@ -243,7 +243,7 @@ local mark_ns = vim.api.nvim_create_namespace("vimnotate.marks")
 A.range_ns = range_ns
 A.mark_ns = mark_ns
 
-local view = { mode = "off", bubbles = {} }
+local view = { mode = "off", bubbles = {}, setting = vim.env.VIMNOTATE_VIEW }
 M.view = view
 
 local seq = 0
@@ -786,7 +786,7 @@ vim.on_key(function(_, typed)
 end, vim.api.nvim_create_namespace("vimnotate.mouse"))
 
 local function bar_setting()
-  local v = vim.g.vimnotate_action_bar
+  local v = vim.env.VIMNOTATE_ACTION_BAR
   if v == "mouse" or v == "never" then
     return v
   end
@@ -1876,7 +1876,7 @@ function M.compose_layout(c)
 end
 
 local function view_setting()
-  local v = vim.g.vimnotate_view
+  local v = view.setting
   if v == "rail" or v == "auto" or v == "off" then
     return v
   end
@@ -2298,7 +2298,7 @@ function M.cycle_view()
       break
     end
   end
-  vim.g.vimnotate_view = nxt
+  view.setting = nxt
   back_to_thread()
   apply_view()
   local note = nxt == "rail" and " (S-Tab focus)" or ""
@@ -2354,7 +2354,7 @@ vim.api.nvim_create_autocmd("WinClosed", {
       view.rail_win = nil
       view.focused = false
       if not view.applying then
-        vim.g.vimnotate_view = "off"
+        view.setting = "off"
         view.mode = "off"
       end
     elseif win == thread_win() and rail_valid() then
@@ -2950,7 +2950,7 @@ local function restore_sent()
   if not items then
     return
   end
-  if vim.g.vimnotate_restore == false then
+  if vim.env.VIMNOTATE_RESTORE == "false" then
     carried = items
     return
   end

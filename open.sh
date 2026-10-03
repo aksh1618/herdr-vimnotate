@@ -8,7 +8,10 @@ pane="$(printf '%s' "$ctx" | jq -r '.focused_pane_id // empty')"
 info="$("$herdr" pane get "$pane")"
 tab="$(printf '%s' "$info" | jq -r '.result.pane.tab_id')"
 workspace="$(printf '%s' "$info" | jq -r '.result.pane.workspace_id')"
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+config="${HERDR_PLUGIN_CONFIG_DIR:-}/config.toml"
+[ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ] && [ -r "$config" ] || config=/dev/null
+state_dir="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}"
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
 server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 if [ -d "$state_dir" ]; then
@@ -24,7 +27,7 @@ if [ -d "$state_dir" ]; then
     fi
   done
 fi
-lines="${VIMNOTATE_LINES:-1000}"
+lines="$(awk -v key=lines -f "$script_dir/config.awk" "$config")"
 dir="$(mktemp -d "${TMPDIR:-/tmp}/herdr-vimnotate.XXXXXX")"
 "$herdr" pane read "$pane" --source visible --format ansi >"$dir/visible.ansi" 2>/dev/null || true
 "$herdr" pane read "$pane" --source recent-unwrapped --format ansi --lines "$lines" >"$dir/thread.ansi" 2>/dev/null \

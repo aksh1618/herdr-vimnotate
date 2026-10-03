@@ -465,7 +465,7 @@ function C.note_cancel()
 end
 
 function C.note_layout(V, A)
-  vim.g.vimnotate_view = "rail"
+  V.view.setting = "rail"
   vim.o.columns = 160
   vim.o.lines = 50
   T.add(2, "good")
@@ -544,7 +544,7 @@ local function set_note(V, text)
 end
 
 local function rail_setup(V)
-  vim.g.vimnotate_view = "rail"
+  V.view.setting = "rail"
   vim.o.columns = 160
   vim.o.lines = 50
   T.add(1, "good")
@@ -632,7 +632,7 @@ function C.pin_rail(V, A)
   T.ok(lines[6]:find("╰", 1, true) == 1, "capped bubble still closes")
   set_note(V, "  ")
   T.ok(rail_lines(V)[1]:find("✎", 1, true) == nil, "blank note unpins")
-  vim.g.vimnotate_view = "inline"
+  V.view.setting = "inline"
   set_note(V, "x")
   V.apply_view()
   T.eq({ V.view.mode, V.view.rail_win and vim.api.nvim_win_is_valid(V.view.rail_win) or false }, { "inline", false }, "inline view has no rail and no pin")
@@ -641,7 +641,7 @@ function C.pin_rail(V, A)
 end
 
 function C.pin_alone(V)
-  vim.g.vimnotate_view = "rail"
+  V.view.setting = "rail"
   vim.o.columns = 160
   set_note(V, "only a note")
   V.apply_view()
@@ -711,7 +711,7 @@ end
 
 local function mouse_setup(V, boxes)
   vim.o.scrolloff = 8
-  vim.g.vimnotate_view = "inline"
+  V.view.setting = "inline"
   for _, r in ipairs(boxes) do
     T.add(r, "comment", "box " .. r)
   end

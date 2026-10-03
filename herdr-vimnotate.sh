@@ -7,9 +7,12 @@ tab="${VIMNOTATE_TAB:?}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 reply="$dir/reply.md"
+config="${HERDR_PLUGIN_CONFIG_DIR:-}/config.toml"
+[ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ] && [ -r "$config" ] || config=/dev/null
+conf() { awk -v key="$1" -f "$script_dir/config.awk" "$config"; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
 server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
-state="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
+state="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
 keep=""
 restore() {
@@ -42,7 +45,8 @@ for _ in 1 2; do
 done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
-VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" VIMNOTATE_SERVER="$server" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
+VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" VIMNOTATE_SERVER="$server" \
+  VIMNOTATE_VIEW="$(conf view)" VIMNOTATE_ACTION_BAR="$(conf action_bar)" VIMNOTATE_RESTORE="$(conf restore)" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
 restore
 [ -f "$reply" ] || exit 0
@@ -69,7 +73,7 @@ fallback() {
   fi
 }
 agent="$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.agent // empty')" || agent=""
-if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$reply")" -gt 1 ]; then
+if [ "$(conf force_send)" != true ] && [ -z "$agent" ] && [ "$(grep -c '' "$reply")" -gt 1 ]; then
   fallback "Annotations not sent" "pane $pane has no agent; multi-line reply not auto-sent"
   exit 0
 fi

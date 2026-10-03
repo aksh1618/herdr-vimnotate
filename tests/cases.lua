@@ -763,4 +763,29 @@ function C.mouse_scrolloff_restore(V)
   end)
 end
 
+local function config_check(V, mode, bar)
+  vim.o.columns = 160
+  vim.o.lines = 50
+  T.add(1, "good")
+  V.apply_view()
+  T.eq(V.view.mode, mode, "view from the config")
+  T.cursor(3)
+  vim.api.nvim_input("V")
+  vim.defer_fn(function()
+    T.eq(V.bars.action.win ~= nil and vim.api.nvim_win_is_valid(V.bars.action.win), bar, "action bar from the config")
+    vim.api.nvim_input("<Esc>")
+    vim.defer_fn(function()
+      T.finish("Cancel")
+    end, 30)
+  end, 50)
+end
+
+function C.config_defaults(V)
+  config_check(V, "inline", true)
+end
+
+function C.config_set(V)
+  config_check(V, "rail", false)
+end
+
 return C

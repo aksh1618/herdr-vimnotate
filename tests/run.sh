@@ -98,23 +98,64 @@ mkdir -p "$work/undo"
 PRE="set undofile undodir=$work/undo" vn ops.txt "" no_undofile
 check '[ -s "$work/reply.md" ] && [ -z "$(ls -A "$work/undo")" ]' "no undo file written"
 PRE="set rtp+=$fx/provider | lua local r = require('nvim-treesitter-textobjects.repeatable_move') vim.keymap.set('n', ';', r.repeat_last_move_next) vim.keymap.set('n', ',', r.repeat_last_move_previous) vim.keymap.set('n', 'f', r.builtin_f_expr, { expr = true })" vn ops.txt "" repeat_provider
+vn ops.txt "" config_defaults
+VIMNOTATE_VIEW=rail VIMNOTATE_ACTION_BAR=never vn ops.txt "" config_set
+
+cf="$work/cf"
+mkdir -p "$cf"
+cfg() { awk -v key="$1" -f "$plugin/config.awk" "$2"; }
+cfgall() { for k in view action_bar restore lines force_send; do printf '%s ' "$(cfg "$k" "$1")"; done; }
+defaults="inline always true 1000 false "
+cat >"$cf/good.toml" <<'EOF'
+# vimnotate
+
+view = "rail"   # side rail
+action_bar="mouse"
+  restore = false
+lines = 250 # fewer
+force_send = true
+unknown = "x"
+EOF
+check '[ "$(cfgall "$cf/good.toml")" = "rail mouse false 250 true " ]' "config: every key, comments, blank lines, unknown key"
+printf 'view = "auto"\r\nlines = 42\r\n' >"$cf/crlf.toml"
+check '[ "$(cfgall "$cf/crlf.toml")" = "auto always true 42 false " ]' "config: CRLF line endings"
+cat >"$cf/bad.toml" <<'EOF'
+view = "sideways"
+action_bar = never
+restore = "false"
+lines = 0
+force_send = yes
+view = "rail
+view = "off" trailing
+lines = 12abc
+lines = -5
+lines = "500"
+= "rail"
+EOF
+check '[ "$(cfgall "$cf/bad.toml")" = "$defaults" ]' "config: invalid values fall back to defaults"
+printf 'view = "off"\n[other]\nview = "rail"\n' >"$cf/table.toml"
+check '[ "$(cfg view "$cf/table.toml")" = off ]' "config: keys under a table are ignored"
+check '[ "$(cfgall /dev/null)" = "$defaults" ]' "config: no file means defaults"
 
 hk="$work/hk"
-mkdir -p "$hk/vimnotate" "$hk/bin"
-d="$hk/vimnotate"
+mkdir -p "$hk/bin" "$hk/conf"
 srv="$(printf '%s' /tmp/sockA | sha256sum | cut -c1-12)"
-for p in p_live p_dead p_broken p_stdout; do
-  printf '{"version":1,"server":"%s","pane":"%s","items":[]}' "$srv" "$p" >"$d/$srv-$p.json"
-done
-printf '{"version":1,"server":"other","pane":"p_dead","items":[]}' >"$d/other-p_dead.json"
-printf '{}' >"$d/old.json"
-touch -d '10081 minutes ago' "$d/old.json"
-printf '{}' >"$d/young.json"
-touch -d '10079 minutes ago' "$d/young.json"
-printf '{}' >"$d/a.json.tmp.1"
-touch -d '61 minutes ago' "$d/a.json.tmp.1"
-printf '{}' >"$d/b.json.tmp.2"
-touch -d '59 minutes ago' "$d/b.json.tmp.2"
+seed() {
+  local d="$1"
+  mkdir -p "$d"
+  for p in p_live p_dead p_broken p_stdout; do
+    printf '{"version":1,"server":"%s","pane":"%s","items":[]}' "$srv" "$p" >"$d/$srv-$p.json"
+  done
+  printf '{"version":1,"server":"other","pane":"p_dead","items":[]}' >"$d/other-p_dead.json"
+  printf '{}' >"$d/old.json"
+  touch -d '10081 minutes ago' "$d/old.json"
+  printf '{}' >"$d/young.json"
+  touch -d '10079 minutes ago' "$d/young.json"
+  printf '{}' >"$d/a.json.tmp.1"
+  touch -d '61 minutes ago' "$d/a.json.tmp.1"
+  printf '{}' >"$d/b.json.tmp.2"
+  touch -d '59 minutes ago' "$d/b.json.tmp.2"
+}
 cat >"$hk/bin/herdr" <<'EOF'
 #!/usr/bin/env bash
 case "$1 $2 $3" in
@@ -122,16 +163,68 @@ case "$1 $2 $3" in
   "pane get p_broken") echo '{"error":"protocol mismatch"}' >&2; exit 1 ;;
   "pane get p_stdout") echo '{"error":{"code":"pane_not_found"}}'; exit 1 ;;
   "pane get "*) echo '{"error":{"code":"pane_not_found"}}' >&2; exit 1 ;;
+  "pane read "*) echo "$*" >>"$HK_LOG"; exit 1 ;;
+  "notification show "*) echo "$3" >>"$HK_LOG" ;;
   *) exit 1 ;;
 esac
 EOF
 chmod +x "$hk/bin/herdr"
-HERDR_SOCKET_PATH=/tmp/sockA XDG_STATE_HOME="$hk" HERDR_BIN_PATH="$hk/bin/herdr" HERDR_PLUGIN_ID=x \
-  HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"p1"}' TMPDIR="$hk" "$plugin/open.sh" >/dev/null 2>&1
-left="$(cd "$d" && ls | sort | tr '\n' ' ')"
+export HK_LOG="$hk/log"
+housekeep() {
+  : >"$HK_LOG"
+  HERDR_SOCKET_PATH=/tmp/sockA HERDR_BIN_PATH="$hk/bin/herdr" HERDR_PLUGIN_ID=x \
+    HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"p1"}' TMPDIR="$hk" "$plugin/open.sh" >/dev/null 2>&1
+}
+listing() { (cd "$1" && ls | sort | tr '\n' ' '); }
 want="$(printf '%s\n' "$srv-p_broken.json" "$srv-p_live.json" "$srv-p_stdout.json" b.json.tmp.2 other-p_dead.json young.json | sort | tr '\n' ' ')"
-check '[ "$left" = "$want" ]' "open.sh housekeeping keeps exactly: $want (got: $left)"
+seed "$hk/plugin-state"
+seed "$hk/xdg/vimnotate"
+printf 'lines = 250\n' >"$hk/conf/config.toml"
+HERDR_PLUGIN_STATE_DIR="$hk/plugin-state" HERDR_PLUGIN_CONFIG_DIR="$hk/conf" XDG_STATE_HOME="$hk/xdg" housekeep
+left="$(listing "$hk/plugin-state")"
+check '[ "$left" = "$want" ]' "open.sh housekeeping in HERDR_PLUGIN_STATE_DIR keeps exactly: $want (got: $left)"
+check '[ "$(ls "$hk/xdg/vimnotate" | wc -l)" -eq 9 ]' "open.sh leaves the XDG state dir alone when HERDR_PLUGIN_STATE_DIR is set"
+check 'grep -q -- "--source recent-unwrapped --format ansi --lines 250" "$HK_LOG"' "open.sh captures config.toml's lines"
+XDG_STATE_HOME="$hk/xdg" housekeep
+left="$(listing "$hk/xdg/vimnotate")"
+check '[ "$left" = "$want" ]' "open.sh housekeeping falls back to XDG_STATE_HOME/vimnotate (got: $left)"
+check 'grep -q -- "--source recent-unwrapped --format ansi --lines 1000" "$HK_LOG"' "open.sh captures 1000 lines with no config"
 check '[ -z "$(find "$hk" -maxdepth 1 -name "herdr-vimnotate.*")" ]' "open.sh removes its temp dir when the pane read fails"
+
+pp="$work/pp"
+mkdir -p "$pp/bin" "$pp/conf" "$pp/noconf"
+for c in bash dirname sha256sum cut tr seq jq sleep stty cat grep awk rm env sort; do
+  ln -s "$(command -v "$c")" "$pp/bin/$c"
+done
+ln -s "$hk/bin/herdr" "$pp/bin/herdr"
+cat >"$pp/bin/nvim" <<'EOF'
+#!/usr/bin/env bash
+env | grep -E '^VIMNOTATE_(VIEW|ACTION_BAR|RESTORE|STATE)=' | sort >"$HK_LOG.env"
+printf 'line one\nline two\n' >"$VIMNOTATE_REPLY"
+EOF
+chmod +x "$pp/bin/nvim"
+cat >"$pp/conf/config.toml" <<'EOF'
+view = "rail"
+action_bar = "never"
+restore = false
+force_send = true
+EOF
+pane_run() {
+  : >"$HK_LOG"
+  rm -rf "$pp/run"
+  mkdir -p "$pp/run"
+  : >"$pp/run/visible.ansi"
+  PATH="$pp/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA VIMNOTATE_DIR="$pp/run" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_TAB=t0 \
+    "$plugin/herdr-vimnotate.sh" >/dev/null 2>&1
+}
+HERDR_PLUGIN_CONFIG_DIR="$pp/conf" HERDR_PLUGIN_STATE_DIR="$pp/state" XDG_STATE_HOME="$pp/xdg" pane_run
+got="$(tr '\n' ' ' <"$HK_LOG.env")"
+check '[ "$got" = "VIMNOTATE_ACTION_BAR=never VIMNOTATE_RESTORE=false VIMNOTATE_STATE=$pp/state/$srv-p1.json VIMNOTATE_VIEW=rail " ]' "herdr-vimnotate.sh passes config.toml and HERDR_PLUGIN_STATE_DIR to nvim (got: $got)"
+check 'grep -q "^Annotation send failed" "$HK_LOG"' "force_send sends a multi-line review to a pane with no agent"
+HERDR_PLUGIN_CONFIG_DIR="$pp/noconf" XDG_STATE_HOME="$pp/xdg" pane_run
+got="$(tr '\n' ' ' <"$HK_LOG.env")"
+check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_RESTORE=true VIMNOTATE_STATE=$pp/xdg/vimnotate/$srv-p1.json VIMNOTATE_VIEW=inline " ]' "herdr-vimnotate.sh defaults with no config.toml, state under XDG_STATE_HOME (got: $got)"
+check 'grep -q "^Annotations not sent" "$HK_LOG"' "a multi-line review to a pane with no agent is not sent by default"
 
 empty() { awk -f "$plugin/composer-empty.awk"; }
 check 'printf "some output\n────────\n❯ \n────────\n  ? for shortcuts\n" | empty' "composer-empty: lone prompt between rules"

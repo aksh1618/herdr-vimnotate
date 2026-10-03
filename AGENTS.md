@@ -4,9 +4,10 @@ A herdr plugin that opens the focused pane's scrollback in nvim, in that pane's 
 
 ## Files
 
-- `open.sh`: the plugin action. Expires old restore state, captures the pane (`visible` + `recent-unwrapped` ANSI), opens the plugin pane, does the two `pane move`s.
-- `herdr-vimnotate.sh`: the plugin pane. Alternate screen, geometry re-apply, runs nvim, moves the target back, sends the review or falls back to the clipboard.
+- `open.sh`: the plugin action. Expires old restore state, captures `lines` of the pane (`visible` + `recent-unwrapped` ANSI), opens the plugin pane, does the two `pane move`s.
+- `herdr-vimnotate.sh`: the plugin pane. Alternate screen, geometry re-apply, runs nvim (handing it `view`, `action_bar` and `restore` as `VIMNOTATE_VIEW`, `VIMNOTATE_ACTION_BAR`, `VIMNOTATE_RESTORE`), moves the target back, sends the review or falls back to the clipboard.
 - `vimnotate.lua`: the whole nvim session. Module table `M`, registered as `require("vimnotate")`.
+- `config.awk`: the one reader of `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. `awk -v key=<name> -f config.awk <file>` prints that key's value, or its default when missing or invalid. Both scripts use it; nvim never reads the file.
 - `composer-empty.awk`: decides whether a Claude Code composer is empty (a lone `❯` between two rules).
 - `tests/`: `run.sh` runs `cases.lua` through `lib.lua` in headless `nvim --clean`.
 
@@ -21,11 +22,11 @@ All tests must pass before committing. A new case is a `function C.<name>(V)` in
 For anything visual, also run it in a real terminal under termctrl, launched the way `herdr-vimnotate.sh` does:
 
 ```sh
-VIMNOTATE_RAW=thread.ansi VIMNOTATE_REPLY=/tmp/x/reply.md VIMNOTATE_STATE=/tmp/x/state.json VIMNOTATE_SELECTED=/dev/null \
+VIMNOTATE_RAW=thread.ansi VIMNOTATE_REPLY=/tmp/x/reply.md VIMNOTATE_STATE=/tmp/x/state.json VIMNOTATE_SELECTED=/dev/null VIMNOTATE_VIEW=rail \
   nvim -i NONE -c "luafile $PWD/vimnotate.lua"
 ```
 
-That loads the user's own nvim config, which is where most breakage shows up. Never drive the user's live herdr session; use `herdr --session <name>` with `HERDR_*` unset.
+That loads the user's own nvim config, which is where most breakage shows up. Never drive the user's live herdr session; use `herdr --session <name>` with `HERDR_*` unset. The plugin link and the plugin config dir are not per session (they live under `$XDG_CONFIG_HOME/herdr`), so also point `XDG_CONFIG_HOME` and `XDG_STATE_HOME` at a scratch dir, on a short path: the session socket lives there and must fit `sun_path`.
 
 ## Code rules
 
@@ -42,7 +43,7 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 - **Capture before the split; resize after every move.** A split rewraps the target, and `pane move` never re-applies geometry, so each pane landing in the slot gets `pane resize --direction right --amount 0`. The vimnotate pane's resize must come from inside the alternate screen, or it settles one scrollbar column narrow.
 - **Send with `pane.send_input`, never `send-text`** (every newline in `send-text` submits). Never submit. Prefix a separator only when the composer isn't known to be empty.
 - **A review must never be lost.** `reply.md` is written before the restore state. Any send failure falls back to the clipboard, and with no clipboard tool the review file is kept and its path is shown.
-- **Privacy:** nvim runs with `-i NONE` (no ShaDa) and `undofile` off. Restore state is `0600` in a `0700` dir, named by a hash of `HERDR_SOCKET_PATH` plus the pane id, because pane ids repeat across herdr servers.
+- **Privacy:** nvim runs with `-i NONE` (no ShaDa) and `undofile` off. Restore state is `0600` in a `0700` dir (`$HERDR_PLUGIN_STATE_DIR`, else `$XDG_STATE_HOME/vimnotate`), named by a hash of `HERDR_SOCKET_PATH` plus the pane id, because pane ids repeat across herdr servers.
 - **Restore matching:** whitespace-insensitive, scored by up to five non-blank context lines each side, ties broken by occurrence index. Text under 8 characters (`strchars`, not bytes) needs a context match, and a linewise item must span whole lines. Unfound items are carried forward, not dropped.
 - **Mouse gestures hold the thread's `scrolloff` at 0** until the next non-mouse key; otherwise a press near the edge scrolls the view and the drag lands on later lines.
 - **The compose popup reserves blank `virt_lines` under its range** and floats over them, so it never covers thread text, and saving swaps the reservation for the box without movement. `nvim_win_text_height` doesn't count `virt_lines` below its end row.
@@ -70,7 +71,7 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 - `layout`: taking and giving back the pane's slot (`pane move`, geometry)
 - `send`: the reply format and delivery, clipboard fallback
 - `restore`: saved state and re-anchoring sent annotations
-- `plugin`: manifest, id, env vars
+- `plugin`: manifest, id, env vars, `config.toml`, plugin dirs
 - `compat`: platform and tool differences (macOS, missing commands)
 - `tests`, `docs`, `agents` (this file)
 

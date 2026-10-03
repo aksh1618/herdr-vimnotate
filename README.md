@@ -1,8 +1,6 @@
 # herdr-vimnotate
 
-[![vimnotate reviewing a Claude Code reply: p marks paragraphs as looking good, d deletes one, c comments on another, q sends the review to the agent's composer](docs/vimnotate-demo.webp)](https://github.com/user-attachments/assets/3ee1c8e2-1a5e-4e24-8de4-9386772cc213)
-
-(Click the image to watch the [25-second demo](https://github.com/user-attachments/assets/3ee1c8e2-1a5e-4e24-8de4-9386772cc213).)
+[![vimnotate reviewing a Claude Code reply: p marks paragraphs as looking good, d deletes one, c comments on another, q sends the review to the agent's composer](docs/vimnotate-demo.webp)](https://github.com/user-attachments/assets/83c63ee7-5f94-4757-9a08-98532e6a04fd)
 
 Press `prefix+a` to switch to annotation mode for the focused Herdr pane, using neovim under the hood. You can review and annotate an agent's reply with vim motions for three operations:
 1. `c` is comment
@@ -13,7 +11,7 @@ So, for example, `cap` comments on a paragraph, `dap` marks one for deletion, `p
 
 Once you're done, press `q` to send the whole review back as one message, sitting unsubmitted in the agent's composer.
 
-While this plugin ~~copies~~ takes inspiration from the plannotator herdr annotation plugin for some of the UI/UX, it is meant to feel more like a built-in mode similar to herdr's copy mode (`prefix+[`) instead of a different TUI. All while giving you those sweet sweet vim motions, of course.
+While this plugin ~~copies~~ takes inspiration from the [plannotator herdr annotation plugin](https://github.com/plannotator/herdr-annotate) for some of the UI/UX, it is meant to feel more like a built-in mode similar to herdr's copy mode (`prefix+[`) instead of a different TUI. All while giving you those sweet sweet vim motions, of course.
 
 Currently **0.x**: I use it daily with my own herdr & neovim config, would love to hear feedback and any issues you run into if you try it, who knows maybe we'll even do 1.0 some day!
 

@@ -9,7 +9,8 @@ info="$("$herdr" pane get "$pane")"
 tab="$(printf '%s' "$info" | jq -r '.result.pane.tab_id')"
 workspace="$(printf '%s' "$info" | jq -r '.result.pane.workspace_id')"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate"
-server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256sum | cut -c1-12)"
+sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
+server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 if [ -d "$state_dir" ]; then
   find "$state_dir" -maxdepth 1 -name '*.json' -mmin +10080 -delete 2>/dev/null || true
   find "$state_dir" -maxdepth 1 -name '*.json.tmp*' -mmin +60 -delete 2>/dev/null || true

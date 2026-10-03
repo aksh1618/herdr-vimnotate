@@ -5,9 +5,10 @@ dir="${VIMNOTATE_DIR:?}"
 pane="${VIMNOTATE_TARGET_PANE:?}"
 tab="${VIMNOTATE_TAB:?}"
 me="${HERDR_PANE_ID:-}"
-script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 reply="$dir/reply.md"
-server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256sum | cut -c1-12)"
+sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
+server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
 restore() {
@@ -52,6 +53,8 @@ clip() {
     xclip -selection clipboard -in
   elif command -v xsel >/dev/null; then
     xsel --clipboard --input
+  elif command -v pbcopy >/dev/null; then
+    pbcopy
   else
     return 1
   fi

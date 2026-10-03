@@ -131,9 +131,16 @@ view = "off" trailing
 lines = 12abc
 lines = -5
 lines = "500"
+lines = 1001
+lines = 4294967296
+lines = 01
 = "rail"
 EOF
 check '[ "$(cfgall "$cf/bad.toml")" = "$defaults" ]' "config: invalid values fall back to defaults"
+printf 'lines = 1\n' >"$cf/min.toml"
+printf 'lines = 1000\n' >"$cf/max.toml"
+printf 'lines = 1\nlines = 1001\n' >"$cf/over.toml"
+check '[ "$(cfg lines "$cf/min.toml") $(cfg lines "$cf/max.toml") $(cfg lines "$cf/over.toml")" = "1 1000 1" ]' "config: lines accepts 1 to 1000 only"
 printf 'view = "off"\n[other]\nview = "rail"\n' >"$cf/table.toml"
 check '[ "$(cfg view "$cf/table.toml")" = off ]' "config: keys under a table are ignored"
 check '[ "$(cfgall /dev/null)" = "$defaults" ]' "config: no file means defaults"

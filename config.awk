@@ -2,7 +2,7 @@ function valid(k, v, quoted) {
   if (k == "view") return quoted && v ~ /^(inline|rail|auto|off)$/
   if (k == "action_bar") return quoted && v ~ /^(always|mouse|never)$/
   if (k == "restore" || k == "force_send") return !quoted && v ~ /^(true|false)$/
-  if (k == "lines") return !quoted && v ~ /^[1-9][0-9]*$/
+  if (k == "lines") return !quoted && (v ~ /^[1-9][0-9]?[0-9]?$/ || v == "1000")
   return 0
 }
 BEGIN {

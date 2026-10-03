@@ -209,6 +209,7 @@ cat >"$pp/bin/nvim" <<'EOF'
 #!/usr/bin/env bash
 env | grep -E '^VIMNOTATE_(VIEW|ACTION_BAR|RESTORE|STATE)=' | sort >"$HK_LOG.env"
 printf 'line one\nline two\n' >"$VIMNOTATE_REPLY"
+[ -z "${HK_EDIT:-}" ] || printf 'force_send = false\n' >"$HK_EDIT"
 EOF
 chmod +x "$pp/bin/nvim"
 cat >"$pp/conf/config.toml" <<'EOF'
@@ -229,6 +230,10 @@ HERDR_PLUGIN_CONFIG_DIR="$pp/conf" HERDR_PLUGIN_STATE_DIR="$pp/state" XDG_STATE_
 got="$(tr '\n' ' ' <"$HK_LOG.env")"
 check '[ "$got" = "VIMNOTATE_ACTION_BAR=never VIMNOTATE_RESTORE=false VIMNOTATE_STATE=$pp/state/$srv-p1.json VIMNOTATE_VIEW=rail " ]' "herdr-vimnotate.sh passes config.toml and HERDR_PLUGIN_STATE_DIR to nvim (got: $got)"
 check 'grep -q "^Annotation send failed" "$HK_LOG"' "force_send sends a multi-line review to a pane with no agent"
+mkdir -p "$pp/edit"
+cp "$pp/conf/config.toml" "$pp/edit/config.toml"
+HK_EDIT="$pp/edit/config.toml" HERDR_PLUGIN_CONFIG_DIR="$pp/edit" XDG_STATE_HOME="$pp/xdg" pane_run
+check 'grep -q "^Annotation send failed" "$HK_LOG"' "config.toml edited during a review doesn't change it"
 HERDR_PLUGIN_CONFIG_DIR="$pp/noconf" XDG_STATE_HOME="$pp/xdg" pane_run
 got="$(tr '\n' ' ' <"$HK_LOG.env")"
 check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_RESTORE=true VIMNOTATE_STATE=$pp/xdg/vimnotate/$srv-p1.json VIMNOTATE_VIEW=inline " ]' "herdr-vimnotate.sh defaults with no config.toml, state under XDG_STATE_HOME (got: $got)"

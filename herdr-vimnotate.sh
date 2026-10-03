@@ -74,7 +74,7 @@ if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$re
   exit 0
 fi
 empty=false
-if "$herdr" pane read "$pane" --source visible 2>/dev/null \
+if "$herdr" pane read "$pane" --source visible --format ansi 2>/dev/null \
   | awk -f "$script_dir/composer-empty.awk"; then
   empty=true
 fi

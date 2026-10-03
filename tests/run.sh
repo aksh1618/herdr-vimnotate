@@ -139,6 +139,22 @@ check '! printf "────────\n❯ half typed\n───────
 check '! printf "────────\n❯ line one\n  line two\n────────\n" | empty' "composer-empty: multi-line draft"
 check '! printf "plain shell\n$ \n" | empty' "composer-empty: no composer"
 check '! printf "────────\n❯ \n────────\nmore\n────────\nx\n────────\n" | empty' "composer-empty: last rule pair decides"
+for a in claude codex pi; do
+  check 'empty <"$fx/composer-$a-empty.ansi"' "composer-empty: $a, empty"
+  for st in typed multi; do
+    check '! empty <"$fx/composer-$a-$st.ansi"' "composer-empty: $a, $st draft"
+  done
+done
+check '! empty <"$fx/composer-codex-blankfirst.ansi"' "composer-empty: codex draft below a blank first line"
+check 'printf "────────\n❯ \033[2mTry something\033[0m\n────────\n" | empty' "composer-empty: faint placeholder"
+check 'printf "────────\n❯ \033[0;2mTry\033[22m\033[2m more\033[m\n────────\n" | empty' "composer-empty: combined faint params"
+check '! printf "────────\n❯ \033[2mTry\033[22m typed\n────────\n" | empty' "composer-empty: 22 ends faint"
+check '! printf "────────\n❯ \033[1;38;2;2;2;2mtyped\033[0m\n────────\n" | empty' "composer-empty: truecolor 2s are not faint"
+check 'printf "────────\n❯ \033[1;2;38;2;9;9;9mhint\033[0m\n────────\n" | empty' "composer-empty: faint among colour params"
+check '! printf "\033[48;5;236m› \033[2mAsk\033[0m\n\033[48;5;236m  typed\033[0m\nfooter\n" | empty' "composer-empty: codex continuation inside the shaded block"
+check 'printf "\033[48;5;236m› \033[2mAsk\033[0m\n\033[48;5;236m \033[0m\nfooter\n" | empty' "composer-empty: codex footer outside the shaded block"
+check '! printf "› \033[2mAsk\033[0m\nfooter\n" | empty' "composer-empty: unshaded codex prompt runs to the next blank"
+check '! printf "› done\n────────\n\n────────\n› Ask\n" | empty' "composer-empty: prompt below the last rule wins"
 
 while IFS= read -r line; do
   case "$line" in

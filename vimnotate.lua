@@ -195,7 +195,7 @@ end
 local KINDS = {
   comment = { glyph = "💬", label = "comment", priority = 0, hl = "VimnotateComment", mark = "VimnotateCommentMark" },
   good = { glyph = "👍", label = "looks good", priority = 1, hl = "VimnotateGood", mark = "VimnotateGoodMark" },
-  delete = { glyph = "✗", label = "delete this", priority = 2, hl = "VimnotateDelete", mark = "VimnotateDeleteMark" },
+  delete = { glyph = "❌", label = "delete this", priority = 2, hl = "VimnotateDelete", mark = "VimnotateDeleteMark" },
 }
 M.KINDS = KINDS
 
@@ -213,9 +213,7 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, "VimnotateBar", { fg = "#d0d0d0", bg = "#444444", ctermfg = 252, ctermbg = 238 })
   for _, name in ipairs({ "Comment", "Good", "Delete" }) do
     local accent = vim.api.nvim_get_hl(0, { name = "Vimnotate" .. name .. "Border" })
-    local base = { fg = accent.fg, ctermfg = accent.ctermfg, bg = "#444444", ctermbg = 238 }
-    vim.api.nvim_set_hl(0, "VimnotateHint" .. name, base)
-    vim.api.nvim_set_hl(0, "VimnotateBar" .. name, vim.tbl_extend("force", base, { bold = true, cterm = { bold = true } }))
+    vim.api.nvim_set_hl(0, "VimnotateBar" .. name, { fg = accent.fg, ctermfg = accent.ctermfg, bg = "#444444", ctermbg = 238, bold = true, cterm = { bold = true } })
     vim.api.nvim_set_hl(0, "Vimnotate" .. name .. "BorderBold", { fg = accent.fg, ctermfg = accent.ctermfg, bold = true, cterm = { bold = true } })
   end
   vim.api.nvim_set_hl(0, "VimnotateCommentActive", { bg = "#878700", ctermbg = 100 })
@@ -591,7 +589,7 @@ local function refresh_loclist()
   vim.fn.setloclist(tw, {}, "r", { title = "vimnotate annotations", items = items })
 end
 
-local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x drop · R toggle view · Tab note · q send"
+local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x remove · R toggle view · Tab note · q send"
 
 local function thread_winbar()
   local counts, sent = {}, 0
@@ -910,19 +908,27 @@ local function in_thread()
   return tw ~= -1 and vim.api.nvim_get_current_win() == tw
 end
 
-local function action_pieces()
+function bars.pieces(entries, hl)
   local pieces = {}
-  for _, a in ipairs(BAR_ACTIONS) do
+  for _, e in ipairs(entries) do
+    pieces[#pieces + 1] = { text = " " .. e.glyph .. " " .. e.label .. " (" .. e.key .. ") ", hl = hl or e.hl, run = e.run }
+  end
+  return pieces
+end
+
+local function action_pieces()
+  return bars.pieces(vim.tbl_map(function(a)
     local kind = KINDS[a.kind]
-    pieces[#pieces + 1] = {
-      text = " " .. kind.glyph .. " " .. a.label .. " (" .. a.key .. ") ",
+    return {
+      glyph = kind.glyph,
+      label = a.label,
+      key = a.key,
       hl = "VimnotateBar" .. kind.hl:sub(10),
       run = function()
         vim.api.nvim_feedkeys(a.key, "m", false)
       end,
     }
-  end
-  return pieces
+  end, BAR_ACTIONS))
 end
 
 local function action_update()
@@ -946,16 +952,11 @@ local function hint_hide()
 end
 
 local function hint_render(item)
-  local name = KINDS[item.kind].hl:sub(10)
-  local pieces = {}
-  for i, h in ipairs({ { "e", "edit", M.edit }, { "x", "remove", M.remove_at_cursor }, { "K", "show", M.hover } }) do
-    if i > 1 then
-      pieces[#pieces + 1] = { text = "·", hl = "VimnotateHint" .. name }
-    end
-    pieces[#pieces + 1] = { text = " " .. h[1], hl = "VimnotateBar" .. name, run = h[3] }
-    pieces[#pieces + 1] = { text = " " .. h[2] .. " ", hl = "VimnotateHint" .. name, run = h[3] }
-  end
-  bar_render(bars.hint, pieces)
+  bar_render(bars.hint, bars.pieces({
+    { glyph = "📝", label = "edit", key = "e", run = M.edit },
+    { glyph = "🧹", label = "remove", key = "x", run = M.remove_at_cursor },
+    { glyph = "🔍", label = "show", key = "K", run = M.hover },
+  }, "VimnotateBar" .. KINDS[item.kind].hl:sub(10)))
   bar_show(bars.hint, A.range(item))
   hint_item = item
 end
@@ -1647,7 +1648,7 @@ local function paint(buf, rows, height)
   end
 end
 
-local RAIL_HINTS = "j/k ⏎ jump · e edit · x drop · esc"
+local RAIL_HINTS = "j/k ⏎ jump · e edit · x remove · esc"
 
 local function rail_winbar()
   if view.focused then

@@ -788,4 +788,30 @@ function C.config_set(V)
   config_check(V, "rail", false)
 end
 
+function C.hint_bar(V)
+  T.add(1, "good")
+  T.add(3, "comment")
+  local bar = V.bars.hint
+  vim.defer_fn(function()
+    T.cursor(2)
+    T.keys("j")
+  end, 300)
+  vim.defer_fn(function()
+    T.eq(bar.win ~= nil and vim.api.nvim_win_is_valid(bar.win), true, "hint bar shown on an annotation")
+    T.eq(vim.api.nvim_buf_get_lines(bar.buf, 0, -1, false)[1], " 📝 edit (e)  🧹 remove (x)  🔍 show (K) ", "hint bar text")
+    T.eq(vim.tbl_map(function(s)
+      return { s.from, s.to, s.hl }
+    end, bar.spans), { { 0, 13, "VimnotateBarComment" }, { 13, 28, "VimnotateBarComment" }, { 28, 41, "VimnotateBarComment" } }, "hint spans by display width, in the accent colour")
+    T.eq(bar.width, 41, "hint bar width")
+    T.eq(V.bars.pieces({ { glyph = "👍", label = "looks good", key = "p" } }, "X")[1].text, " 👍 looks good (p) ", "shared piece format")
+    local pos = vim.api.nvim_win_get_position(bar.win)
+    local x = pos[2] + bar.spans[2].from + 6
+    T.mouse({ { "press", pos[1], x }, { "release", pos[1], x } }, function()
+      T.eq(#T.items(), 1, "clicking remove drops the annotation under the cursor")
+      T.eq(T.items()[1].at, { 1, 1 }, "the other annotation stays")
+      T.finish("Cancel")
+    end)
+  end, 700)
+end
+
 return C

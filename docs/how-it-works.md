@@ -33,7 +33,7 @@ Annotations are extmarks on that buffer, so they move with the text: the highlig
 
 The review goes back through `pane.send_input` over the socket, which pastes it as one bracketed chunk. Raw `send-text` is not usable: its newlines each submit, so a multi-line review would fire as several messages.
 
-If the target pane has **no agent** and the review is multi-line, it is copied to the clipboard and a notification says so, instead of being typed into a shell a line at a time. `force_send = true` in the [config](../README.md#configuration) overrides that. If the send fails, the review is copied to the clipboard too. With no clipboard tool, the review file is kept instead and the notification gives its path.
+If the target pane has **no agent** and the review is multi-line, it is copied to the clipboard and a notification says so, instead of being typed into a shell a line at a time. `force_send = true` in the [config](../README.md#configuration) overrides that. If the send fails, the review is copied to the clipboard too. With no clipboard tool, the review's temp directory is kept instead, captures included, and the notification gives the review file's path.
 
 ## Restoring sent annotations
 

@@ -74,8 +74,10 @@ In the thread:
 | `<Tab>` | Open the general note, a popup whose text is sent above the annotations. |
 | `q` | Send and quit. |
 
-- Operators add a new annotation, even over an existing one; `e` is how you edit.
-- The exception is a [restored annotation](#what-gets-sent) : `d`, `p` or `c` on exactly its range changes its kind and makes it pending again.
+- Operators add a new annotation, even over an existing one; `e` is how you edit. The exceptions are on exactly an existing annotation's range:
+  - `d` or `p` where one of the same kind is already there adds nothing; a [restored](#what-gets-sent) one becomes pending again.
+  - `d`, `p` or `c` on a restored annotation of another kind changes its kind and makes it pending again; `c` opens the compose popup on it.
+  - `c` on a comment adds another comment, whether that comment is restored or not.
 - Motions and text objects are vim's own, so `w`, `ap`, `}` and whatever text objects your config adds all work.
 - The comment compose popup is an ordinary vim buffer: `Enter` saves (in insert or normal mode), `Ctrl-j` inserts a new line, `Esc` goes to normal mode and `q` there cancels.
 - The note popup is a plain buffer too, but `Enter` is just a newline. `q` or `Tab` in normal mode hides it, and so does clicking back into the thread. Hiding never discards the note; only `:Cancel` does.
@@ -104,7 +106,7 @@ Remove this.
 
 A comment line starting with `>` is sent as `\>`, so it never reads as quoted text.
 
-When the agent's composer is empty, the review is pasted as-is; a dimmed placeholder such as Codex's `Ask Codex to do anything` counts as empty. Otherwise it's separated from whatever is already in the composer, by a blank line for a multi-line review or a space for a one-liner, so a second review never glues onto unsent text.
+When the agent's composer is recognisably empty, the review is pasted as-is; a dimmed placeholder such as Codex's `Ask Codex to do anything` counts as empty. Otherwise, and whenever vimnotate [can't tell](#does-it-edit-my-neovim-config), it's separated from whatever is already in the composer, by a blank line for a multi-line review or a space for a one-liner, so a second review never glues onto unsent text.
 
 When you send, the annotations are saved for that pane. Open the same pane again and they're found again in the new capture and shown dimmed, marked as sent. They're left out of the next send unless you edit or re-mark one, which makes it pending again; `x` removes one for good. How they're matched and where the state lives: [docs/how-it-works.md](docs/how-it-works.md#restoring-sent-annotations).
 
@@ -128,14 +130,14 @@ action_bar = "always"
 # false doesn't show sent annotations again, but still keeps them saved.
 restore = true
 
-# How much scrollback to capture. 1000 is also the most `pane read --lines` returns.
+# How much scrollback to capture, from 1 to 1000. 1000 is also the most `pane read --lines` returns.
 lines = 1000
 
 # true sends a multi-line review to a pane with no agent anyway (see docs/how-it-works.md#sending).
 force_send = false
 ```
 
-- It's read each time vimnotate opens, so changes apply to the next review without restarting herdr.
+- It's read each time vimnotate opens, so changes apply to the next review without restarting herdr. A review that's already open keeps the settings it started with.
 - Only flat `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments.
 - Unknown keys/values are ignored.
 
@@ -147,11 +149,13 @@ How the pane's slot is taken and given back, how the thread is rendered, how the
 
 ### Does it share anything with my everyday neovim?
 
-vimnotate loads your neovim config, but a review session shares no state with your other neovim sessions, in either direction:
+vimnotate loads your neovim config, but a review session keeps neovim's own state apart from your other neovim sessions:
 
 - nvim runs with `-i NONE` (no ShaDa), so a review never adds its searches, commands or yanked thread text to your history and registers, and your jumplist and old files never leak into the thread (`<C-o>` can't walk into them).
 - `undofile` is off, so review text never lands in your undo directory. Swap files are off too.
-- The capture lives in a `mktemp -d` directory that is removed on exit. The only thing kept is the [restore](#what-gets-sent) state.
+- The clipboard is shared. If your config sets `clipboard=unnamedplus`, yanks in a review reach the system clipboard, and pasting in a popup reads from it.
+- Anything a plugin in your config keeps outside ShaDa (its own history or session files, say) behaves as in any other neovim; vimnotate doesn't isolate it.
+- The capture lives in a `mktemp -d` directory that is removed on exit. The only thing kept is the [restore](#what-gets-sent) state, except when a send fails and there's no clipboard tool: then the whole directory, captures included, is kept so the review isn't lost, and the notification gives the review's path.
 
 ### Does it edit my neovim config?
 
@@ -161,7 +165,7 @@ No. The plugin needs to override some neovim config to work well, but only insid
 - Global left-mouse maps are deleted and `mouse=a` is forced, since the drag-select gesture needs the mouse.
 - `lualine` is hidden if present, and `laststatus=0` is kept.
 - The compose and note popups are `filetype=markdown`, which pulls in whatever markdown stack is loaded. It's pre-warmed on a throwaway buffer so it doesn't load inside the first keypress.
-- The empty-composer check knows two composer shapes: the text between the last two horizontal rules (Claude Code, pi), or a `›` prompt below them through its shaded block (Codex). It's empty when that holds nothing but faint text and one leading `❯`, `›` or `>`. Other agents, and anything it can't place, get a leading blank line above the annotations (a space before a one-line review).
+- The empty-composer check is a heuristic that recognises the composer shapes of Claude Code, pi and Codex: a single line between the last two coloured horizontal rules with only coloured text below them (Claude Code, pi), or a `›` prompt at the start of a line through its shaded block (Codex). It's empty when that holds nothing but faint text and Claude Code's leading `❯` or Codex's `›`. Other agents, and anything it isn't sure of, get a leading blank line above the annotations (a space before a one-line review).
 
 ## License
 

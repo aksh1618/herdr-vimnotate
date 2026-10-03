@@ -112,18 +112,32 @@ When you send, the annotations are saved for that pane. Open the same pane again
 
 ## Configuration
 
-Set these in your neovim config; the session loads it.
+Settings go in `config.toml` in vimnotate's herdr plugin config directory. To find it:
 
-| Setting | Values |
-| --- | --- |
-| `vim.g.vimnotate_view` | `"inline"` (default) boxes under each range; `"rail"` a side rail; `"auto"` the rail when the thread still keeps 80 columns, else inline; `"off"` highlights only. `R` switches at runtime. |
-| `vim.g.vimnotate_action_bar` | `"always"` (default) shows the action bar for every visual selection; `"mouse"` only for mouse selections; `"never"`. |
-| `vim.g.vimnotate_restore` | `true` (default); `false` doesn't show sent annotations again, but still keeps them saved. |
+```sh
+herdr plugin config-dir aksh1618.vimnotate
+```
 
-And two environment variables, read from herdr's environment:
+That's usually `~/.config/herdr/plugins/config/aksh1618.vimnotate/`. Every key is optional; this is the full set, at the defaults:
 
-- `VIMNOTATE_LINES`: how much scrollback to capture. Defaults to 1000, which is also the most `pane read --lines` returns.
-- `VIMNOTATE_FORCE_SEND=1`: send a multi-line review to a pane with no agent anyway (see [Sending](docs/how-it-works.md#sending)).
+```toml
+# "inline" boxes under each range, "rail" a side rail, "auto" the rail when the thread still keeps 80 columns (else inline), "off" highlights only. R switches at runtime.
+view = "inline"
+
+# "always" shows the action bar for every visual selection, "mouse" only for mouse selections, "never" not at all.
+action_bar = "always"
+
+# false doesn't show sent annotations again, but still keeps them saved.
+restore = true
+
+# How much scrollback to capture. 1000 is also the most `pane read --lines` returns.
+lines = 1000
+
+# true sends a multi-line review to a pane with no agent anyway (see docs/how-it-works.md#sending).
+force_send = false
+```
+
+It's read each time vimnotate opens, so changes apply to the next review without restarting herdr. Only flat `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments. A key it doesn't know, or a value it can't use, falls back to the default.
 
 ## How it works
 

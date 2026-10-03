@@ -33,11 +33,11 @@ Annotations are extmarks on that buffer, so they move with the text: the highlig
 
 The review goes back through `pane.send_input` over the socket, which pastes it as one bracketed chunk. Raw `send-text` is not usable: its newlines each submit, so a multi-line review would fire as several messages.
 
-If the target pane has **no agent** and the review is multi-line, it is copied to the clipboard and a notification says so, instead of being typed into a shell a line at a time. `VIMNOTATE_FORCE_SEND=1` overrides that. If the send fails, the review is copied to the clipboard too. With no clipboard tool, the review file is kept instead and the notification gives its path.
+If the target pane has **no agent** and the review is multi-line, it is copied to the clipboard and a notification says so, instead of being typed into a shell a line at a time. `force_send = true` in the [config](../README.md#configuration) overrides that. If the send fails, the review is copied to the clipboard too. With no clipboard tool, the review file is kept instead and the notification gives its path.
 
 ## Restoring sent annotations
 
-Each sent annotation is matched by its text plus up to five non-blank lines of context on each side, so new output above it or repeated lines don't move it to the wrong place. One that can't be found is carried forward, not dropped. The state lives in `$XDG_STATE_HOME/vimnotate/`, falling back to `~/.local/state/vimnotate/` on every platform (macOS too), one file per herdr server and pane, `0600` in a `0700` directory. Each time vimnotate opens, it deletes files older than 7 days and files whose pane herdr reports as gone.
+Each sent annotation is matched by its text plus up to five non-blank lines of context on each side, so new output above it or repeated lines don't move it to the wrong place. One that can't be found is carried forward, not dropped. The state lives in vimnotate's herdr plugin state directory (`$HERDR_PLUGIN_STATE_DIR`, usually `~/.local/state/herdr/plugins/aksh1618.vimnotate/`; `$XDG_STATE_HOME/vimnotate/` or `~/.local/state/vimnotate/` when run outside herdr), one file per herdr server and pane, `0600` in a `0700` directory. Each time vimnotate opens, it deletes files older than 7 days and files whose pane herdr reports as gone.
 
 ## Running the tests
 

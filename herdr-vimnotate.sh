@@ -11,6 +11,7 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 25
 server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
+keep=""
 restore() {
   [ -n "$restored" ] && return 0
   restored=1
@@ -22,7 +23,7 @@ restore() {
 }
 cleanup() {
   restore
-  rm -rf "$dir"
+  [ -n "$keep" ] || rm -rf "$dir"
 }
 trap cleanup EXIT HUP TERM INT
 for _ in $(seq 1 60); do
@@ -59,10 +60,17 @@ clip() {
     return 1
   fi
 }
-agent="$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.agent // empty')"
+fallback() {
+  if clip <"$reply"; then
+    "$herdr" notification show "$1, copied to clipboard" --body "$2" --sound none || true
+  else
+    keep=1
+    "$herdr" notification show "$1, saved to $reply" --body "$2" --sound none || true
+  fi
+}
+agent="$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.agent // empty')" || agent=""
 if [ -z "${VIMNOTATE_FORCE_SEND:-}" ] && [ -z "$agent" ] && [ "$(grep -c '' "$reply")" -gt 1 ]; then
-  clip <"$reply" || true
-  "$herdr" notification show "Annotations copied to clipboard" --body "pane $pane has no agent; multi-line reply not auto-sent" --sound none || true
+  fallback "Annotations not sent" "pane $pane has no agent; multi-line reply not auto-sent"
   exit 0
 fi
 empty=false
@@ -70,8 +78,7 @@ if "$herdr" pane read "$pane" --source visible 2>/dev/null \
   | awk -f "$script_dir/composer-empty.awk"; then
   empty=true
 fi
-resp="$(jq -Rsc --arg pane "$pane" --argjson empty "$empty" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if $empty then "" elif test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")"
+resp="$(jq -Rsc --arg pane "$pane" --argjson empty "$empty" '{id:"vimnotate",method:"pane.send_input",params:{pane_id:$pane,text:(rtrimstr("\n") | (if $empty then "" elif test("\n") then "\n\n" else " " end) + .),keys:[]}}' "$reply" | socat - "UNIX-CONNECT:${HERDR_SOCKET_PATH:?}")" || resp="${resp:-no response from herdr}"
 if ! printf '%s' "$resp" | grep -q '"type":"ok"'; then
-  clip <"$reply" || true
-  "$herdr" notification show "Annotation send failed — copied to clipboard" --body "$resp" --sound none || true
+  fallback "Annotation send failed" "$resp"
 fi

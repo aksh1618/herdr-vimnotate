@@ -228,12 +228,13 @@ check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_RESTORE=true VIMNOTATE_
 check 'grep -q "^Annotations not sent" "$HK_LOG"' "a multi-line review to a pane with no agent is not sent by default"
 
 empty() { awk -f "$plugin/composer-empty.awk"; }
-check 'printf "some output\n────────\n❯ \n────────\n  ? for shortcuts\n" | empty' "composer-empty: lone prompt between rules"
-check 'printf "────────\n❯\n────────\n" | empty' "composer-empty: prompt without trailing space"
-check '! printf "────────\n❯ half typed\n────────\n" | empty' "composer-empty: typed text"
-check '! printf "────────\n❯ line one\n  line two\n────────\n" | empty' "composer-empty: multi-line draft"
+r="\033[90m────────\033[0m"
+check 'printf "some output\n$r\n❯ \n$r\n  \033[90m? for shortcuts\033[0m\n" | empty' "composer-empty: lone prompt between rules"
+check 'printf "$r\n❯\n$r\n" | empty' "composer-empty: prompt without trailing space"
+check '! printf "$r\n❯ half typed\n$r\n" | empty' "composer-empty: typed text"
+check '! printf "$r\n❯ line one\n  line two\n$r\n" | empty' "composer-empty: multi-line draft"
 check '! printf "plain shell\n$ \n" | empty' "composer-empty: no composer"
-check '! printf "────────\n❯ \n────────\nmore\n────────\nx\n────────\n" | empty' "composer-empty: last rule pair decides"
+check '! printf "$r\n❯ \n$r\nmore\n$r\nx\n$r\n" | empty' "composer-empty: last rule pair decides"
 for a in claude codex pi; do
   check 'empty <"$fx/composer-$a-empty.ansi"' "composer-empty: $a, empty"
   for st in typed multi; do
@@ -241,11 +242,18 @@ for a in claude codex pi; do
   done
 done
 check '! empty <"$fx/composer-codex-blankfirst.ansi"' "composer-empty: codex draft below a blank first line"
-check 'printf "────────\n❯ \033[2mTry something\033[0m\n────────\n" | empty' "composer-empty: faint placeholder"
-check 'printf "────────\n❯ \033[0;2mTry\033[22m\033[2m more\033[m\n────────\n" | empty' "composer-empty: combined faint params"
-check '! printf "────────\n❯ \033[2mTry\033[22m typed\n────────\n" | empty' "composer-empty: 22 ends faint"
-check '! printf "────────\n❯ \033[1;38;2;2;2;2mtyped\033[0m\n────────\n" | empty' "composer-empty: truecolor 2s are not faint"
-check 'printf "────────\n❯ \033[1;2;38;2;9;9;9mhint\033[0m\n────────\n" | empty' "composer-empty: faint among colour params"
+check '! empty <"$fx/composer-pi-rule.ansi"' "composer-empty: pi draft holding a typed rule"
+check '! empty <"$fx/composer-pi-gt.ansi"' "composer-empty: pi draft that is a lone >"
+check '! empty <"$fx/composer-pi-below.ansi"' "composer-empty: empty ruled box with a draft below it"
+check '! empty <"$fx/composer-codex-chevron.ansi"' "composer-empty: codex continuation line starting with ›"
+check '! empty <"$fx/composer-codex-chevron0.ansi"' "composer-empty: codex continuation › at column 0"
+check '! printf "────────\n❯ \n────────\n" | empty' "composer-empty: rules in the default colour are typed text"
+check '! printf "$r\n❯ \n\n$r\n" | empty' "composer-empty: a box of more than one line"
+check 'printf "$r\n❯ \033[2mTry something\033[0m\n$r\n" | empty' "composer-empty: faint placeholder"
+check 'printf "$r\n❯ \033[0;2mTry\033[22m\033[2m more\033[m\n$r\n" | empty' "composer-empty: combined faint params"
+check '! printf "$r\n❯ \033[2mTry\033[22m typed\n$r\n" | empty' "composer-empty: 22 ends faint"
+check '! printf "$r\n❯ \033[1;38;2;2;2;2mtyped\033[0m\n$r\n" | empty' "composer-empty: truecolor 2s are not faint"
+check 'printf "$r\n❯ \033[1;2;38;2;9;9;9mhint\033[0m\n$r\n" | empty' "composer-empty: faint among colour params"
 check '! printf "\033[48;5;236m› \033[2mAsk\033[0m\n\033[48;5;236m  typed\033[0m\nfooter\n" | empty' "composer-empty: codex continuation inside the shaded block"
 check 'printf "\033[48;5;236m› \033[2mAsk\033[0m\n\033[48;5;236m \033[0m\nfooter\n" | empty' "composer-empty: codex footer outside the shaded block"
 check '! printf "› \033[2mAsk\033[0m\nfooter\n" | empty' "composer-empty: unshaded codex prompt runs to the next blank"

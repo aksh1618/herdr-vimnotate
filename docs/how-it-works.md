@@ -39,6 +39,11 @@ If the target pane has **no agent** and the review is multi-line, it is copied t
 
 Each sent annotation is matched by its text plus up to five non-blank lines of context on each side, so new output above it or repeated lines don't move it to the wrong place. One that can't be found is carried forward, not dropped. The state lives in vimnotate's herdr plugin state directory (`$HERDR_PLUGIN_STATE_DIR`, usually `~/.local/state/herdr/plugins/aksh1618.vimnotate/`; `$XDG_STATE_HOME/vimnotate/` or `~/.local/state/vimnotate/` when run outside herdr), one file per herdr server and pane, `0600` in a `0700` directory. Each time vimnotate opens, it deletes files older than 7 days and files whose pane herdr reports as gone.
 
+## Minimum versions
+
+- **herdr 0.9.0** (`min_herdr_version` in the manifest): the slot takeover (`plugin pane open --placement tab`, then two `pane move`s) and the copy-mode `selected_text` hand-off were built and tested on 0.9.0. It is untested on earlier versions, and the workarounds in [The resize that isn't](#the-resize-that-isnt) are for 0.9's behaviour.
+- **neovim 0.11**: developed on 0.12; the test suite passes on 0.11.0 and fails on 0.10, which lacks the floating-window `mouse` option and key-discarding `vim.on_key`.
+
 ## Running the tests
 
 ```sh

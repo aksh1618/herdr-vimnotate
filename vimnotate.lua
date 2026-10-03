@@ -787,10 +787,10 @@ end, vim.api.nvim_create_namespace("vimnotate.mouse"))
 
 local function bar_setting()
   local v = vim.g.vimnotate_action_bar
-  if v == "always" or v == "never" then
+  if v == "mouse" or v == "never" then
     return v
   end
-  return "mouse"
+  return "always"
 end
 
 local function bar_allowed(mouse)

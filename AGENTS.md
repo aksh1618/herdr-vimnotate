@@ -1,6 +1,6 @@
 # herdr-vimnotate
 
-A herdr plugin that opens the focused pane's scrollback in nvim, in that pane's own layout slot, lets the user annotate it with vim operators, and pastes the review unsubmitted into the agent's composer. The README is the user-facing spec (keys, send format, settings); this file is for changing the code.
+A herdr plugin that opens the focused pane's scrollback in nvim, in that pane's own layout slot, lets the user annotate it with vim motions, and pastes the review unsubmitted into the agent's composer. The README is the user-facing spec (keys, send format, settings); this file is for changing the code.
 
 ## Files
 

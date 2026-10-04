@@ -33,6 +33,12 @@ The thread is a **normal, non-modifiable buffer**, not a terminal buffer, with t
 
 Annotations are extmarks on that buffer, so they move with the text: the highlights are `hl_group` ranges, the inline boxes are `virt_lines`, and the compose popup opens over blank virtual lines reserved where the box will land, so it never covers the thread and saving it doesn't make anything jump.
 
+## The clipboard anchor
+
+A mouse selection never reaches a plugin action: the prefix key clears it before the action runs, so only a copy-mode selection arrives as `selected_text`. But with its default `ui.copy_on_select = true` herdr copies every mouse selection to CLIPBOARD (never PRIMARY), so when there is no `selected_text`, `open.sh` reads CLIPBOARD as text (`wl-paste --type text`, `xclip -selection clipboard`, `xsel --clipboard` or `pbpaste`). The tool runs in the background and is killed after half a second or once it has written more than 64 KiB, so a stuck clipboard owner can't stall `prefix+a`. Its output counts only if it exited successfully within both limits; anything partial is discarded rather than used, since a truncated prefix could match the wrong text.
+
+The text goes to `clipboard.txt` in the review's `0700` temp dir, created `0600`. nvim reads and deletes it at startup and uses it only if it has at least 8 non-blank characters and is found in the thread; otherwise it is dropped silently. When it anchors, its SHA-256 is written to `<server>.clip` in the state dir, and `open.sh` skips clipboard text with that hash, so a stale clipboard doesn't reopen the popup on every later review. Only that hash of text already shown in the thread is kept; the clipboard text itself never leaves the temp dir.
+
 ## Sending
 
 The review goes back through `pane.send_input` over the socket, which pastes it as one bracketed chunk. Raw `send-text` is not usable: its newlines each submit, so a multi-line review would fire as several messages.

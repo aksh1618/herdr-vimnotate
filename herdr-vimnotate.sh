@@ -7,6 +7,7 @@ tab="${VIMNOTATE_TAB:?}"
 zoomed="${VIMNOTATE_ZOOMED:-false}"
 tab_label="${VIMNOTATE_TAB_LABEL:-}"
 tab_rename="${VIMNOTATE_TAB_RENAME:-false}"
+clip_hash="${VIMNOTATE_CLIP_HASH:-}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 reply="$dir/reply.md"
@@ -22,7 +23,8 @@ key_delete="$(conf keys.delete)"
 key_looks_good="$(conf keys.looks_good)"
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
 server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
-state="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
+state_dir="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}"
+state="$state_dir/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
 keep=""
 parked=""
@@ -97,10 +99,14 @@ for _ in 1 2; do
 done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
-VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" VIMNOTATE_SERVER="$server" \
+VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_CLIPBOARD="$dir/clipboard.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" VIMNOTATE_SERVER="$server" \
   VIMNOTATE_VIEW="$view" VIMNOTATE_ACTION_BAR="$action_bar" VIMNOTATE_RESTORE="$restore_on" \
   VIMNOTATE_KEY_COMMENT="$key_comment" VIMNOTATE_KEY_DELETE="$key_delete" VIMNOTATE_KEY_LOOKS_GOOD="$key_looks_good" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
+rm -f "$dir/clipboard.txt"
+if [ -n "$clip_hash" ] && [ -e "$dir/clipboard.txt.used" ]; then
+  (umask 077 && mkdir -p "$state_dir" && printf '%s\n' "$clip_hash" >"$state_dir/$server.clip") || true
+fi
 unrename
 restore
 [ -f "$reply" ] || exit 0

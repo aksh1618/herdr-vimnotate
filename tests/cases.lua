@@ -457,6 +457,40 @@ function C.note_fallback(V)
   T.finish()
 end
 
+local function clip_files()
+  local p = vim.env.VIMNOTATE_CLIPBOARD
+  return { vim.uv.fs_stat(p) ~= nil, vim.uv.fs_stat(p .. ".used") ~= nil }
+end
+
+function C.clip_anchor(V)
+  T.eq(pending(), { { 2, 2, "VimnotateCommentActive" } }, "clipboard text found in the thread anchors the compose popup")
+  T.ok(V.composing() ~= nil, "compose open at startup")
+  T.eq(clip_files(), { false, true }, "clipboard file removed, use recorded")
+  T.finish("Cancel")
+end
+
+function C.clip_unfound(V)
+  T.eq(pending(), {}, "clipboard text not in the thread anchors nothing")
+  T.ok(V.composing() == nil, "no compose popup")
+  local nl = note_lines()
+  T.ok(not V.note_shown() and (nl == nil or table.concat(nl) == ""), "clipboard text is never quoted into the note")
+  T.eq(clip_files(), { false, false }, "clipboard file removed, no use recorded")
+  T.finish("Cancel")
+end
+
+function C.clip_short(V)
+  T.eq(pending(), {}, "clipboard text under 8 characters anchors nothing")
+  T.ok(V.composing() == nil, "no compose popup")
+  T.finish("Cancel")
+end
+
+function C.clip_after_selection(V)
+  T.eq(pending(), {}, "a copy-mode selection wins over the clipboard")
+  T.eq(note_lines(), { "> not in the thread", "> second line", "", "" }, "the selection is still quoted into the note")
+  T.eq(clip_files(), { true, false }, "clipboard left unread")
+  T.finish("Cancel")
+end
+
 function C.note_cancel()
   T.cursor(0)
   T.keys("<Tab>keep me<Esc>q")

@@ -42,23 +42,51 @@ hide_chrome()
 restore.restore_sent()
 apply_view()
 
+local CLIPBOARD_MIN_CHARS = 8
+
+local function read_anchor_file(path)
+  if not path or path == "" then
+    return ""
+  end
+  local f = io.open(path, "rb")
+  if not f then
+    return ""
+  end
+  local text = f:read("*a"):gsub("%s+$", "")
+  f:close()
+  return text
+end
+
 local anchored = false
-local selected_path = vim.env.VIMNOTATE_SELECTED
-if selected_path and selected_path ~= "" then
-  local sf = io.open(selected_path, "rb")
-  if sf then
-    local selected = sf:read("*a"):gsub("%s+$", "")
-    sf:close()
-    if selected ~= "" then
-      local r = find_in_thread(selected)
-      if r then
-        anchored = true
-        vim.cmd("normal! m'")
-        vim.api.nvim_win_set_cursor(0, { r.srow + 1, r.scol })
-        vim.cmd("normal! zz")
-        M.compose({ range = r })
-      else
-        quote_into_note(vim.split(selected, "\n", { plain = true }))
+local function anchor(r)
+  anchored = true
+  vim.cmd("normal! m'")
+  vim.api.nvim_win_set_cursor(0, { r.srow + 1, r.scol })
+  vim.cmd("normal! zz")
+  M.compose({ range = r })
+end
+
+local selected = read_anchor_file(vim.env.VIMNOTATE_SELECTED)
+if selected ~= "" then
+  local r = find_in_thread(selected)
+  if r then
+    anchor(r)
+  else
+    quote_into_note(vim.split(selected, "\n", { plain = true }))
+  end
+else
+  local clip_path = vim.env.VIMNOTATE_CLIPBOARD
+  local clip = read_anchor_file(clip_path)
+  if clip_path and clip_path ~= "" then
+    os.remove(clip_path)
+  end
+  if vim.fn.strchars((clip:gsub("%s", ""))) >= CLIPBOARD_MIN_CHARS then
+    local r = find_in_thread(clip)
+    if r then
+      anchor(r)
+      local used = io.open(clip_path .. ".used", "wb")
+      if used then
+        used:close()
       end
     end
   end

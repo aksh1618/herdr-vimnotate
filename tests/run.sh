@@ -23,7 +23,7 @@ vn() {
   local cap="$1" state="$2" name="$3"
   rm -f "$work/reply.md" "$work/note.md"
   VIMNOTATE_RAW="$fx/$cap" VIMNOTATE_STATE="$state" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_SERVER="${SERVER:-srvA}" \
-    VIMNOTATE_REPLY="$work/reply.md" VIMNOTATE_SELECTED="${SELECTED:-/dev/null}" VIMNOTATE_TEST_OUT="$out" \
+    VIMNOTATE_REPLY="$work/reply.md" VIMNOTATE_SELECTED="${SELECTED:-/dev/null}" VIMNOTATE_CLIPBOARD="${CLIPBOARD:-}" VIMNOTATE_TEST_OUT="$out" \
     timeout 20 nvim --clean --headless -i NONE --cmd "${PRE:-}" -c "luafile $plugin/vimnotate.lua" -c "luafile $here/lib.lua" \
     -c "lua T.run('$here/cases.lua', '$name')" >>"$work/nvim.log" 2>&1
   if ! grep -q "^END $name\$" "$out"; then
@@ -81,6 +81,15 @@ vn ops.txt "" note_none
 check '[ ! -e "$work/reply.md" ]' "empty note and no annotations write no reply"
 SELECTED="$fx/missing.txt" vn ops.txt "" note_fallback
 check '[ "$(cat "$work/reply.md")" = "$(printf "> not in the thread\n> second line\n\nreply here")" ]' "copy-mode fallback note is sent"
+clip() { rm -f "$work/clip.txt" "$work/clip.txt.used"; printf "$1" >"$work/clip.txt"; }
+clip '  line three\n\n'
+CLIPBOARD="$work/clip.txt" vn ops.txt "" clip_anchor
+clip 'not in the thread\n'
+CLIPBOARD="$work/clip.txt" vn ops.txt "" clip_unfound
+clip 'line'
+CLIPBOARD="$work/clip.txt" vn ops.txt "" clip_short
+clip 'line three'
+SELECTED="$fx/missing.txt" CLIPBOARD="$work/clip.txt" vn ops.txt "" clip_after_selection
 vn ops.txt "" note_cancel
 check '[ ! -e "$work/reply.md" ]' ":Cancel discards the note"
 vn ops.txt "" note_layout
@@ -289,11 +298,11 @@ check 'grep -q "^Annotations not sent" "$HK_LOG"' "a multi-line review to a pane
 
 lk="$work/lk"
 mkdir -p "$lk/bin"
-for c in bash dirname sha256sum cut tr seq jq sleep stty cat grep awk rm env sort mktemp find; do
+for c in bash dirname sha256sum cut tr seq jq sleep stty cat grep awk rm env sort mktemp find head wc mkdir; do
   ln -s "$(command -v "$c")" "$lk/bin/$c"
 done
 cp "$pp/bin/nvim" "$lk/bin/nvim"
-printf '%s\n' '[ -z "${LK_RENAME:-}" ] || echo "$LK_RENAME" >"$LK_DIR/label"' >>"$lk/bin/nvim"
+printf '%s\n' '[ -z "${LK_RENAME:-}" ] || echo "$LK_RENAME" >"$LK_DIR/label"' '[ -z "${LK_CLIP_USED:-}" ] || : >"$VIMNOTATE_CLIPBOARD.used"' >>"$lk/bin/nvim"
 cat >"$lk/bin/herdr" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$LK_LOG"
@@ -313,13 +322,14 @@ esac
 EOF
 chmod +x "$lk/bin/herdr"
 export LK_LOG="$lk/log" LK_DIR="$lk"
+mkdir -p "$lk/tmp"
 lk_open() {
   : >"$LK_LOG"
   echo t1 >"$lk/tab"
   echo "$1" >"$lk/zoomed"
   printf '%s\n' "${2-2}" >"$lk/label"
   PATH="$lk/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA HERDR_PLUGIN_ID=x XDG_STATE_HOME="$lk/xdg" \
-    HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"p1"}' TMPDIR="$lk" "$plugin/open.sh" >/dev/null 2>&1
+    HERDR_PLUGIN_CONTEXT_JSON="${LK_CTX:-{\"focused_pane_id\":\"p1\"\}}" TMPDIR="$lk/tmp" "$plugin/open.sh" >/dev/null 2>&1
 }
 lk_pane() {
   : >"$LK_LOG"
@@ -349,13 +359,13 @@ got="$(calls)"
 check '[ "$got" = "pane move p1 --tab t1 --target-pane pv --split down --focus;" ]' "an unzoomed review returns the target without zooming (got: $got)"
 check '! grep -q "^tab rename" "$LK_LOG"' "an auto-named tab is never renamed"
 lk_open false build
-check 'grep -q -- "--label build \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL=build\$" "$LK_LOG"' "open.sh names the parked tab after a labelled tab"
+check 'grep -q -- "--label build \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL=build --env" "$LK_LOG"' "open.sh names the parked tab after a labelled tab"
 lk_open false
 check 'grep -q "VIMNOTATE_TAB_RENAME=false" "$LK_LOG"' "open.sh treats a tab labelled with its position as auto-named"
 lk_open false 3
 check 'grep -q "VIMNOTATE_TAB_RENAME=true" "$LK_LOG"' "open.sh compares the label with the tab's position, not its stable number"
 lk_open false ""
-check 'grep -q -- "--label \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL=\$" "$LK_LOG"' "open.sh keeps an explicitly empty label"
+check 'grep -q -- "--label \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL= --env" "$LK_LOG"' "open.sh keeps an explicitly empty label"
 lk_pane false build build true
 got="$(grep "^tab rename" "$LK_LOG" | tr '\n' ';')"
 check '[ "$got" = "tab rename t1 vimnotate: build;tab rename t1 build;" ] && [ "$(cat "$lk/label")" = build ]' "a labelled tab is renamed while annotating and restored after (got: $got)"
@@ -366,6 +376,53 @@ lk_pane false other build true
 check '! grep -q "^tab rename" "$LK_LOG" && [ "$(cat "$lk/label")" = other ]' "a tab renamed before the review starts is left alone"
 LK_RENAME=mine lk_pane false build build true
 check '[ "$(cat "$lk/label")" = mine ]' "a tab the user renamed mid-review keeps the user's name"
+
+cat >"$lk/wl-paste" <<'EOF'
+#!/usr/bin/env bash
+echo "wl-paste $*" >>"$LK_LOG"
+cat "$LK_DIR/clip_src"
+[ -z "${LK_CLIP_FAIL:-}" ] || exit 1
+[ -z "${LK_CLIP_HANG:-}" ] || exec sleep 5
+EOF
+chmod +x "$lk/wl-paste"
+clip_open() {
+  rm -rf "${lk:?}/tmp" "$lk/bin/wl-paste"
+  mkdir -p "$lk/tmp"
+  [ -z "${LK_NOPASTE:-}" ] && ln -s "$lk/wl-paste" "$lk/bin/wl-paste"
+  WAYLAND_DISPLAY=wayland-x lk_open false
+  clip_file="$(find "$lk/tmp" -name clipboard.txt)"
+}
+hash_of() { printf '%s' "$1" | sha256sum | cut -c1-64; }
+printf 'some clipboard text' >"$lk/clip_src"
+clip_open
+check '[ -n "$clip_file" ] && [ "$(cat "$clip_file")" = "some clipboard text" ] && [ "$(stat -c %a "$clip_file")" = 600 ]' "open.sh copies the clipboard into a 0600 file in the review's temp dir"
+check 'grep -q "VIMNOTATE_CLIP_HASH=$(hash_of "some clipboard text")" "$LK_LOG" && grep -q "^wl-paste --no-newline --type text" "$LK_LOG"' "open.sh reads CLIPBOARD as text and passes only its hash"
+LK_CTX='{"focused_pane_id":"p1","selected_text":"picked"}' clip_open
+check '[ -z "$clip_file" ] && ! grep -q "^wl-paste" "$LK_LOG"' "open.sh leaves the clipboard alone when copy mode has a selection"
+head -c 65537 /dev/zero | tr '\0' x >"$lk/clip_src"
+clip_open
+check '[ -z "$clip_file" ] && grep -q "VIMNOTATE_CLIP_HASH=\$" "$LK_LOG"' "open.sh ignores a clipboard over 64 KiB"
+head -c 65536 /dev/zero | tr '\0' x >"$lk/clip_src"
+clip_open
+check '[ -n "$clip_file" ]' "open.sh accepts a clipboard of exactly 64 KiB"
+printf 'some clipboard text' >"$lk/clip_src"
+mkdir -p "$lk/xdg/vimnotate"
+hash_of "some clipboard text" >"$lk/xdg/vimnotate/$srv.clip"
+clip_open
+check '[ -z "$clip_file" ]' "open.sh skips clipboard text that already anchored a review"
+rm -f "$lk/xdg/vimnotate/$srv.clip"
+t0=$SECONDS
+LK_CLIP_HANG=1 clip_open
+check '[ $((SECONDS - t0)) -le 2 ] && [ -z "$clip_file" ]' "a hanging clipboard tool can't stall open.sh, and its partial output is dropped"
+LK_CLIP_FAIL=1 clip_open
+check '[ -z "$clip_file" ]' "output from a failed clipboard read is dropped"
+LK_NOPASTE=1 clip_open
+check '[ -z "$clip_file" ] && grep -q "VIMNOTATE_CLIP_HASH=\$" "$LK_LOG"' "open.sh carries on with no clipboard tool"
+rm -f "$lk/bin/wl-paste"
+lk_pane false
+check '[ ! -e "$lk/xdg/vimnotate/$srv.clip" ]' "an unused clipboard records nothing"
+LK_CLIP_USED=1 VIMNOTATE_CLIP_HASH=abc lk_pane false
+check '[ "$(cat "$lk/xdg/vimnotate/$srv.clip")" = abc ] && [ "$(stat -c %a "$lk/xdg/vimnotate/$srv.clip")" = 600 ]' "a clipboard anchor records its hash, 0600"
 
 empty() { awk -f "$plugin/composer-empty.awk"; }
 r="\033[90m────────\033[0m"

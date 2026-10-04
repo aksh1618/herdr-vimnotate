@@ -38,7 +38,7 @@ To hack on it, clone the repo and `herdr plugin link <path>` instead.
 - herdr **0.9.0+** (what it's built and tested on)
 - neovim **0.11+** (for floating-window mouse support; developed on 0.12)
 - `bash`, `jq`, `socat`, `awk`, and `sha256sum` or `shasum`
-- `wl-copy`, `xclip`, `xsel` or `pbcopy` for the clipboard fallback (optional)
+- `wl-copy`/`wl-paste`, `xclip`, `xsel` or `pbcopy`/`pbpaste` for the clipboard fallback and the clipboard anchor (optional)
 
 The manifest lists macOS and the scripts avoid GNU-only tools, but it has only been run on Linux. Why these minimums: [docs/how-it-works.md](docs/how-it-works.md#minimum-versions).
 
@@ -52,6 +52,8 @@ The manifest lists macOS and the scripts avoid GNU-only tools, but it has only b
 6. `:Cancel` throws the review away.
 
 Already selected something in herdr's copy mode? Press `prefix+a` with the selection still active and vimnotate opens with the comment popup on that text. If it can't find the text in the thread, it quotes it into the general note instead.
+
+Selected it with the mouse instead? herdr copies a mouse selection to the clipboard (with its default `ui.copy_on_select = true`), and the prefix key clears the selection itself, so with no copy-mode selection vimnotate reads the clipboard and anchors the comment popup on that text, but only if it's in this pane's thread and has at least 8 non-blank characters. Anything else on the clipboard is ignored, never quoted into the note. The same clipboard text anchors only one review; copy something else, or use copy mode, to anchor on it again.
 
 ## Keymap
 
@@ -189,7 +191,7 @@ vimnotate loads your neovim config, but a review session keeps neovim's own stat
 - `undofile` is off, so review text never lands in your undo directory. Swap files are off too.
 - The clipboard is shared. If your config sets `clipboard=unnamedplus`, yanks in a review reach the system clipboard, and pasting in a popup reads from it.
 - Anything a plugin in your config keeps outside ShaDa (its own history or session files, say) behaves as in any other neovim; vimnotate doesn't isolate it.
-- The capture lives in a `mktemp -d` directory that is removed on exit. The only thing kept is the [restore](#what-gets-sent) state, except when a send fails and there's no clipboard tool: then the whole directory, captures included, is kept so the review isn't lost, and the notification gives the review's path.
+- The capture lives in a `mktemp -d` directory that is removed on exit. The only things kept are the [restore](#what-gets-sent) state and, after clipboard text anchors a review, a hash of that text (so it anchors only once), except when a send fails and there's no clipboard tool: then the whole directory, captures included, is kept so the review isn't lost, and the notification gives the review's path.
 
 ### Does it edit my neovim config?
 

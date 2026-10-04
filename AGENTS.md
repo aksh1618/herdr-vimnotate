@@ -6,7 +6,7 @@ Machine-specific notes, if present: @AGENTS.local.md
 
 ## Files
 
-- `open.sh`: the plugin action. Expires old restore state, captures `lines` of the pane (`visible` + `recent-unwrapped` ANSI), opens the plugin pane, does the two `pane move`s.
+- `open.sh`: the plugin action. Expires old restore state, captures `lines` of the pane (`visible` + `recent-unwrapped` ANSI) and the copy-mode selection or else the clipboard, opens the plugin pane, does the two `pane move`s.
 - `herdr-vimnotate.sh`: the plugin pane. Alternate screen, geometry re-apply, runs nvim (handing it `view`, `action_bar` and `restore` as `VIMNOTATE_VIEW`, `VIMNOTATE_ACTION_BAR`, `VIMNOTATE_RESTORE`), moves the target back, sends the review or falls back to the clipboard.
 - `vimnotate.lua`: the entry point loaded with `luafile`. Registers every file in `lua/vimnotate/` in `package.preload` by its absolute path, clearing any cached copy, then requires `vimnotate`. Preload runs before the `runtimepath` searcher and `vim.loader`, so a module of the same name elsewhere can't shadow these.
 - `lua/vimnotate/`: the nvim session, one module per area.
@@ -67,6 +67,7 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 - **Send with `pane.send_input`, never `send-text`** (every newline in `send-text` submits). Never submit. Prefix a separator only when the composer isn't known to be empty.
 - **A review must never be lost.** `reply.md` is written before the restore state. Any send failure falls back to the clipboard, and with no clipboard tool the review file is kept and its path is shown.
 - **Privacy:** nvim runs with `-i NONE` (no ShaDa) and `undofile` off. Restore state is `0600` in a `0700` dir (`$HERDR_PLUGIN_STATE_DIR`, else `$XDG_STATE_HOME/vimnotate`), named by a hash of `HERDR_SOCKET_PATH` plus the pane id, because pane ids repeat across herdr servers.
+- **The clipboard is read only as an anchor.** Killed after 0.5 s or past 64 KiB with partial output dropped, written `0600` to the temp dir, deleted by nvim on read, used only if found in the thread and never quoted into the note. Only its hash is kept, and only after it anchored.
 - **Restore matching:** whitespace-insensitive, scored by up to five non-blank context lines each side, ties broken by occurrence index. Text under 8 characters (`strchars`, not bytes) needs a context match, and a linewise item must span whole lines. Unfound items are carried forward, not dropped.
 - **Mouse gestures hold the thread's `scrolloff` at 0** until the next non-mouse key; otherwise a press near the edge scrolls the view and the drag lands on later lines.
 - **The compose popup reserves `virt_lines` under its range** and floats over them, so it never covers thread text, and saving swaps the reservation for the box without movement. In the inline view the reservation is the box's own frame and the float is borderless over its text area. `boxes.wrap_text` reproduces nvim's `linebreak` wrapping (checked against a real window by the `wrap_matches_nvim` test), and the popup turns off `breakindent` and `showbreak` and uses the global `tabstop`, so text wraps the same before and after saving; only tabs at or after a wrap boundary can still space or wrap differently. `nvim_win_text_height` doesn't count `virt_lines` below its end row.

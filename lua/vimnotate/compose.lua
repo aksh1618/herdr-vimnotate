@@ -36,15 +36,37 @@ function M.composing()
   return compose
 end
 
-local function compose_resize(c)
+local function compose_rows(c)
+  local h = vim.api.nvim_win_text_height(c.win, {}).all
+  if vim.api.nvim_get_mode().mode:sub(1, 1) == "i" and vim.api.nvim_get_current_win() == c.win then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(c.win))
+    local line = vim.api.nvim_buf_get_lines(c.buf, row - 1, row, false)[1] or ""
+    if col >= #line and line ~= "" then
+      local info = vim.fn.getwininfo(c.win)[1]
+      local width = math.max(1, info.width - info.textoff)
+      local need = math.floor((vim.fn.virtcol({ row, "$" }, 0, c.win) - 1) / width) + 1
+      local have = vim.api.nvim_win_text_height(c.win, { start_row = row - 1, end_row = row - 1 }).all
+      h = h + math.max(0, need - have)
+    end
+  end
+  return math.max(1, math.min(h, COMPOSE_MAX_ROWS))
+end
+
+local function compose_resize(c, cursor_only)
   if not vim.api.nvim_win_is_valid(c.win) then
     return
   end
-  local h = vim.api.nvim_win_text_height(c.win, {}).all
-  c.height = math.max(1, math.min(h, COMPOSE_MAX_ROWS))
+  local h = compose_rows(c)
+  if cursor_only and h == c.height then
+    return
+  end
+  c.height = h
+  c.title = compose_title(c)
   local cfg = M.compose_layout(c)
-  cfg.title = compose_title(c)
-  cfg.title_pos = "left"
+  if not c.inline then
+    cfg.title = c.title
+    cfg.title_pos = "left"
+  end
   if not vim.deep_equal(cfg, c.cfg) then
     c.cfg = cfg
     vim.api.nvim_win_set_config(c.win, cfg)
@@ -125,19 +147,31 @@ function M.compose(opts)
   compose = c
   local title = compose_title(c, true)
   c.base_width = math.max(COMPOSE_MIN_WIDTH, vim.fn.strdisplaywidth(title) + 2, vim.fn.strdisplaywidth(compose_title(c, false)) + 2)
+  c.title = title
   local cfg = M.compose_layout(c)
-  cfg.border = "rounded"
   cfg.style = "minimal"
-  cfg.title = title
-  cfg.title_pos = "left"
+  if c.inline then
+    cfg.border = "none"
+  else
+    cfg.border = "rounded"
+    cfg.title = title
+    cfg.title_pos = "left"
+  end
   c.win = vim.api.nvim_open_win(c.buf, true, cfg)
   vim.wo[c.win].conceallevel = 2
   chrome.markdown_warm = true
   vim.bo[c.buf].filetype = "markdown"
   vim.wo[c.win].wrap = true
   vim.wo[c.win].linebreak = c.inline
+  vim.wo[c.win].breakindent = false
+  vim.bo[c.buf].tabstop = vim.go.tabstop
+  vim.wo[c.win].showbreak = "NONE"
   vim.wo[c.win].winfixbuf = false
-  vim.wo[c.win].winhighlight = "FloatBorder:" .. accent.hl .. "Border,FloatTitle:VimnotateTitle"
+  if c.inline then
+    vim.wo[c.win].winhighlight = "NormalFloat:Normal"
+  else
+    vim.wo[c.win].winhighlight = "FloatBorder:" .. accent.hl .. "Border,FloatTitle:VimnotateTitle"
+  end
   local o = { buffer = c.buf, nowait = true }
   vim.keymap.set("i", "<CR>", "<Esc><Cmd>lua require('vimnotate').compose_save()<CR>", o)
   vim.keymap.set("i", "<C-j>", "<CR>", o)
@@ -154,11 +188,20 @@ function M.compose(opts)
       end
     end,
   })
+  vim.api.nvim_create_autocmd("CursorMovedI", {
+    group = group,
+    buffer = c.buf,
+    callback = function()
+      if compose == c then
+        compose_resize(c, true)
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd("ModeChanged", {
     group = group,
     callback = function()
-      if compose == c and vim.api.nvim_win_is_valid(c.win) then
-        vim.api.nvim_win_set_config(c.win, { title = compose_title(c), title_pos = "left" })
+      if compose == c then
+        compose_resize(c)
       end
     end,
   })

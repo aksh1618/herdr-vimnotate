@@ -13,6 +13,8 @@ local view = core.view
 local back_to_thread = core.back_to_thread
 local accent_of = boxes.accent_of
 local bubble = boxes.bubble
+local frame = boxes.frame
+local KINDS = core.KINDS
 local rail_valid = rail.valid
 local rail_render = rail.render
 local rail_width = rail.width
@@ -74,8 +76,19 @@ local function inline_render()
       end
     else
       c.offset = #groups[erow]
-      for _ = 1, c.rows do
-        table.insert(groups[erow], { { " " } })
+      if c.inline then
+        local blank = {}
+        for _ = 1, c.rows - 2 do
+          blank[#blank + 1] = ""
+        end
+        for _, row in ipairs(frame(c.title or "", "VimnotateTitle", blank, nil, width, KINDS[c.kind].hl .. "Border", false)) do
+          table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
+          table.insert(groups[erow], row)
+        end
+      else
+        for _ = 1, c.rows do
+          table.insert(groups[erow], { { " " } })
+        end
       end
     end
   end
@@ -142,12 +155,12 @@ function M.compose_layout(c)
   local ep = vim.fn.screenpos(tw, r.erow + 1, ecol + 1)
   local x
   if c.inline then
-    x = info.textoff + INLINE_INDENT + 1
+    x = info.textoff + INLINE_INDENT + 2
   else
     local sp = vim.fn.screenpos(tw, r.srow + 1, (r.linewise and 0 or r.scol) + 1)
     x = sp.col > 0 and (sp.col - info.wincol) or 0
   end
-  x = math.max(0, math.min(x, info.width - c.width - 2))
+  x = math.max(0, math.min(x, info.width - c.width - (c.inline and 0 or 2)))
   return {
     relative = "win",
     win = tw,
@@ -155,7 +168,7 @@ function M.compose_layout(c)
     height = c.height,
     bufpos = { r.erow, ecol },
     anchor = "NW",
-    row = 1 + (c.offset or 0),
+    row = (c.inline and 2 or 1) + (c.offset or 0),
     col = ep.col > 0 and (x - (ep.col - info.wincol)) or x,
   }
 end

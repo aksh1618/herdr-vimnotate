@@ -196,6 +196,7 @@ No. The plugin needs to override some neovim config to work well, but only insid
 - `lualine` is hidden if present, and `laststatus=0` is kept.
 - The thread window's `winhighlight` maps `WinBar` to `VimnotateWinbar`, and `MsgArea` links to `VimnotateMsgArea` (see [Colours](#colours)).
 - The compose and note popups are `filetype=markdown`, which pulls in whatever markdown stack is loaded. It's pre-warmed on a throwaway buffer so it doesn't load inside the first keypress.
+- The compose popup turns off `breakindent` and `showbreak` and uses your global `tabstop`, overriding those settings from a markdown ftplugin. In the inline view, this makes its text wrap like the box it turns into. Tabs at or after a wrap boundary can still produce different spacing or wrapping.
 - The empty-composer check is a heuristic that recognises the composer shapes of Claude Code, pi and Codex: a single line between the last two coloured horizontal rules with only coloured text below them (Claude Code, pi), or a `›` prompt at the start of a line through its shaded block (Codex). It's empty when that holds nothing but faint text and Claude Code's leading `❯` or Codex's `›`. Other agents, and anything it isn't sure of, get a leading blank line above the annotations (a space before a one-line review).
 
 ## License

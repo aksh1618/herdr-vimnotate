@@ -6,11 +6,7 @@ local KINDS = core.KINDS
 local dw = vim.fn.strdisplaywidth
 
 local function chars(s)
-  local out = {}
-  for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-    out[#out + 1] = ch
-  end
-  return out
+  return vim.fn.split(s, "\\zs")
 end
 
 local function truncate(s, width)
@@ -31,33 +27,66 @@ end
 
 local function wrap_text(text, width)
   width = math.max(width, 1)
+  local ts = math.max(vim.go.tabstop, 1)
+  local brk = {}
+  for ch in vim.go.breakat:gmatch(".") do
+    brk[ch] = true
+  end
   local out = {}
   for _, para in ipairs(vim.split(text, "\n", { plain = true })) do
-    local line, lw = "", 0
-    for word in para:gmatch("%S+") do
-      local ww = dw(word)
-      if lw > 0 and lw + 1 + ww <= width then
-        line, lw = line .. " " .. word, lw + 1 + ww
-      else
-        if lw > 0 then
-          out[#out + 1] = line
-        end
-        line, lw = "", 0
-        if ww > width then
-          for _, ch in ipairs(chars(word)) do
-            local cw = dw(ch)
-            if lw > 0 and lw + cw > width then
-              out[#out + 1] = line
-              line, lw = "", 0
-            end
-            line, lw = line .. ch, lw + cw
+    local cs = chars(para)
+    local lead = 1
+    while cs[lead] and brk[cs[lead]] do
+      lead = lead + 1
+    end
+    local row, col, base = {}, 0, 0
+    local function size(ch, at)
+      if ch == "\t" then
+        return ts - (base + at) % ts
+      end
+      return dw(ch)
+    end
+    local function newline()
+      out[#out + 1] = table.concat(row)
+      row, col, base = {}, 0, base + width
+    end
+    for i, ch in ipairs(cs) do
+      local w = size(ch, col)
+      if ch ~= "\t" and col > 0 and col + w > width then
+        row[#row + 1] = string.rep(">", width - col)
+        newline()
+      end
+      local wrap = false
+      if i > lead and brk[ch] and cs[i + 1] and not brk[cs[i + 1]] then
+        local col2 = col
+        local j = i + 1
+        while cs[j] and (brk[cs[j]] or j == i + 1 or not brk[cs[j - 1]]) do
+          col2 = col2 + size(cs[j], col2)
+          if col2 >= width - (w - 1) then
+            wrap = true
+            break
           end
-        else
-          line, lw = word, ww
+          j = j + 1
         end
       end
+      if wrap then
+        row[#row + 1] = ch == "\t" and "" or ch
+        row[#row + 1] = string.rep(" ", width - col - (ch == "\t" and 0 or w))
+        newline()
+      elseif ch == "\t" then
+        while col + w > width do
+          row[#row + 1] = string.rep(" ", width - col)
+          w = w - (width - col)
+          newline()
+        end
+        row[#row + 1] = string.rep(" ", w)
+        col = col + w
+      else
+        row[#row + 1] = ch
+        col = col + w
+      end
     end
-    out[#out + 1] = line
+    out[#out + 1] = table.concat(row)
   end
   return out
 end
@@ -92,6 +121,9 @@ local function bubble(item, width, edge, fit)
   local lines, text_hl = { kind.label }, "VimnotateLabel"
   if body ~= "" then
     lines, text_hl = wrap_text(body, width - 4), nil
+    if #lines > #vim.split(body, "\n", { plain = true }) then
+      fit = false
+    end
   end
   return frame(title, accent_of(item), lines, text_hl, width, edge, fit)
 end

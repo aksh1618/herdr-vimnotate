@@ -93,6 +93,9 @@ vn ops.txt "" pin_rail
 vn ops.txt "" pin_alone
 vn ops.txt "" pin_nav
 vn ops.txt "" popup_undo
+vn ops.txt "" compose_full_row
+vn ops.txt "" compose_box_wrap
+vn ops.txt "" wrap_matches_nvim
 vn ops.txt "" mouse_scrolloff_bar
 vn ops.txt "" mouse_scrolloff_plain
 vn ops.txt "" mouse_scrolloff_restore

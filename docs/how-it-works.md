@@ -13,6 +13,8 @@ herdr has no pane-local placement. `popup` is centred over everything, `overlay`
 
 The vimnotate pane is now the only pane in that slot, at the target's dimensions. On exit the target is moved back in beside it and the vimnotate pane closes, leaving the target in its old slot. Pane ids, processes, scrollback and labels all survive; nothing is recreated.
 
+**Zoom.** herdr refuses to move a pane into or out of a zoomed tab: the move exits 0 but reports `changed: false` with reason `zoomed_tab`. So a zoomed target is unzoomed after the capture and before the moves, and the vimnotate pane zooms itself once it is in the slot. On exit both tabs are unzoomed so the target can move back, and if the vimnotate pane was still zoomed, the zoom is handed to the target. Closing a pane always clears its tab's zoom, so the vimnotate pane first moves out to a tab of its own, and the target is zoomed only once that move has actually happened.
+
 Then the part that makes it invisible: the pane enters the alternate screen, prints the captured `visible.ansi` and only then starts nvim over it, so there is no flash of an empty shell between the two.
 
 ### The resize that isn't

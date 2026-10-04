@@ -287,6 +287,61 @@ got="$(tr '\n' ' ' <"$HK_LOG.env")"
 check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_KEY_COMMENT=c VIMNOTATE_KEY_DELETE=d VIMNOTATE_KEY_LOOKS_GOOD=p VIMNOTATE_RESTORE=true VIMNOTATE_STATE=$pp/xdg/vimnotate/$srv-p1.json VIMNOTATE_VIEW=inline " ]' "herdr-vimnotate.sh defaults with no config.toml, state under XDG_STATE_HOME (got: $got)"
 check 'grep -q "^Annotations not sent" "$HK_LOG"' "a multi-line review to a pane with no agent is not sent by default"
 
+lk="$work/lk"
+mkdir -p "$lk/bin"
+for c in bash dirname sha256sum cut tr seq jq sleep stty cat grep awk rm env sort mktemp find; do
+  ln -s "$(command -v "$c")" "$lk/bin/$c"
+done
+cp "$pp/bin/nvim" "$lk/bin/nvim"
+cat >"$lk/bin/herdr" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$LK_LOG"
+case "$*" in
+  "pane get p1") printf '{"result":{"pane":{"pane_id":"p1","tab_id":"%s","workspace_id":"w1"}}}\n' "$(cat "$LK_DIR/tab")" ;;
+  "pane layout --pane "*) printf '{"result":{"layout":{"zoomed":%s}}}\n' "$(cat "$LK_DIR/zoomed")" ;;
+  "pane zoom "*" --on") echo true >"$LK_DIR/zoomed" ;;
+  "pane zoom "*" --off") echo false >"$LK_DIR/zoomed" ;;
+  "pane read "*) echo text ;;
+  "plugin pane open "*) echo '{"result":{"plugin_pane":{"pane":{"pane_id":"pv"}}}}' ;;
+  "pane move p1 --new-tab "*) echo tp >"$LK_DIR/tab" ;;
+  "pane move p1 --tab "*) echo t1 >"$LK_DIR/tab" ;;
+esac
+EOF
+chmod +x "$lk/bin/herdr"
+export LK_LOG="$lk/log" LK_DIR="$lk"
+lk_open() {
+  : >"$LK_LOG"
+  echo t1 >"$lk/tab"
+  echo "$1" >"$lk/zoomed"
+  PATH="$lk/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA HERDR_PLUGIN_ID=x XDG_STATE_HOME="$lk/xdg" \
+    HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"p1"}' TMPDIR="$lk" "$plugin/open.sh" >/dev/null 2>&1
+}
+lk_pane() {
+  : >"$LK_LOG"
+  echo tp >"$lk/tab"
+  echo false >"$lk/zoomed"
+  rm -rf "${lk:?}/run"
+  mkdir -p "$lk/run"
+  : >"$lk/run/visible.ansi"
+  PATH="$lk/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA HERDR_PANE_ID=pv XDG_STATE_HOME="$lk/xdg" \
+    VIMNOTATE_DIR="$lk/run" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_TAB=t1 VIMNOTATE_ZOOMED="$1" \
+    "$plugin/herdr-vimnotate.sh" >/dev/null 2>&1
+}
+calls() { grep -E '^pane (zoom|move)' "$LK_LOG" | tr '\n' ';'; }
+lk_open true
+got="$(calls)"
+check '[ "$got" = "pane zoom p1 --off;pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label vimnotate · parked;" ]' "open.sh unzooms a zoomed target before taking its slot (got: $got)"
+check 'grep -q "VIMNOTATE_ZOOMED=true" "$LK_LOG"' "open.sh tells the pane the target was zoomed"
+lk_open false
+got="$(calls)"
+check '[ "$got" = "pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label vimnotate · parked;" ]' "open.sh leaves an unzoomed target's zoom alone (got: $got)"
+lk_pane true
+got="$(calls)"
+check '[ "$got" = "pane zoom pv --on;pane zoom pv --off;pane move p1 --tab t1 --target-pane pv --split down --focus;pane move pv --new-tab --no-focus;pane zoom p1 --on;" ]' "a zoomed review hands the zoom back to the target (got: $got)"
+lk_pane false
+got="$(calls)"
+check '[ "$got" = "pane move p1 --tab t1 --target-pane pv --split down --focus;" ]' "an unzoomed review returns the target without zooming (got: $got)"
+
 empty() { awk -f "$plugin/composer-empty.awk"; }
 r="\033[90m────────\033[0m"
 check 'printf "some output\n$r\n❯ \n$r\n  \033[90m? for shortcuts\033[0m\n" | empty' "composer-empty: lone prompt between rules"

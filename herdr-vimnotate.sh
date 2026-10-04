@@ -4,6 +4,7 @@ herdr="${HERDR_BIN_PATH:-herdr}"
 dir="${VIMNOTATE_DIR:?}"
 pane="${VIMNOTATE_TARGET_PANE:?}"
 tab="${VIMNOTATE_TAB:?}"
+zoomed="${VIMNOTATE_ZOOMED:-false}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 reply="$dir/reply.md"
@@ -22,12 +23,29 @@ server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 state="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
 restored=""
 keep=""
+parked=""
+tab_of() { "$herdr" pane get "$1" 2>/dev/null | jq -r '.result.pane.tab_id // empty'; }
+zoomed_at() { [ "$("$herdr" pane layout --pane "$1" 2>/dev/null | jq -r '.result.layout.zoomed // false')" = true ]; }
 restore() {
   [ -n "$restored" ] && return 0
   restored=1
+  local rezoom=false
   if [ -n "$me" ]; then
+    if zoomed_at "$me"; then
+      rezoom=true
+      "$herdr" pane zoom "$me" --off >/dev/null 2>&1 || true
+    fi
+    if zoomed_at "$pane"; then
+      "$herdr" pane zoom "$pane" --off >/dev/null 2>&1 || true
+    fi
     "$herdr" pane move "$pane" --tab "$tab" --target-pane "$me" --split down --focus >/dev/null 2>&1 \
       || "$herdr" pane move "$pane" --tab "$tab" --split down --focus >/dev/null 2>&1 || true
+  fi
+  if [ "$rezoom" = true ] && [ "$(tab_of "$pane")" = "$tab" ]; then
+    "$herdr" pane move "$me" --new-tab --no-focus >/dev/null 2>&1 || true
+    if [ "$(tab_of "$me")" != "$tab" ]; then
+      "$herdr" pane zoom "$pane" --on >/dev/null 2>&1 || true
+    fi
   fi
   "$herdr" pane resize --pane "$pane" --direction right --amount 0 >/dev/null 2>&1 || true
 }
@@ -37,11 +55,17 @@ cleanup() {
 }
 trap cleanup EXIT HUP TERM INT
 for _ in $(seq 1 60); do
-  [ "$("$herdr" pane get "$pane" 2>/dev/null | jq -r '.result.pane.tab_id // empty')" != "$tab" ] && break
+  if [ "$(tab_of "$pane")" != "$tab" ]; then
+    parked=1
+    break
+  fi
   sleep 0.05
 done
 printf '\033[?1049h\033[?25l'
 before="$(stty size 2>/dev/null || true)"
+if [ "$zoomed" = true ] && [ -n "$me" ] && [ -n "$parked" ]; then
+  "$herdr" pane zoom "$me" --on >/dev/null 2>&1 || true
+fi
 for _ in 1 2; do
   [ -n "$me" ] || break
   "$herdr" pane resize --pane "$me" --direction right --amount 0 >/dev/null 2>&1 || true

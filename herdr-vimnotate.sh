@@ -5,6 +5,8 @@ dir="${VIMNOTATE_DIR:?}"
 pane="${VIMNOTATE_TARGET_PANE:?}"
 tab="${VIMNOTATE_TAB:?}"
 zoomed="${VIMNOTATE_ZOOMED:-false}"
+tab_label="${VIMNOTATE_TAB_LABEL:-}"
+tab_rename="${VIMNOTATE_TAB_RENAME:-false}"
 me="${HERDR_PANE_ID:-}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 reply="$dir/reply.md"
@@ -24,7 +26,21 @@ state="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate
 restored=""
 keep=""
 parked=""
+renamed=""
 tab_of() { "$herdr" pane get "$1" 2>/dev/null | jq -r '.result.pane.tab_id // empty'; }
+label_of() { "$herdr" tab get "$tab" 2>/dev/null | jq -er '.result.tab.label'; }
+unrename() {
+  [ -n "$renamed" ] || return 0
+  local current
+  for _ in 1 2 3; do
+    if current="$(label_of)"; then
+      [ "$current" != "$renamed" ] || "$herdr" tab rename "$tab" "$tab_label" >/dev/null 2>&1 || { sleep 0.1; continue; }
+      renamed=""
+      return 0
+    fi
+    sleep 0.1
+  done
+}
 zoomed_at() { [ "$("$herdr" pane layout --pane "$1" 2>/dev/null | jq -r '.result.layout.zoomed // false')" = true ]; }
 restore() {
   [ -n "$restored" ] && return 0
@@ -50,6 +66,7 @@ restore() {
   "$herdr" pane resize --pane "$pane" --direction right --amount 0 >/dev/null 2>&1 || true
 }
 cleanup() {
+  unrename
   restore
   [ -n "$keep" ] || rm -rf "$dir"
 }
@@ -61,6 +78,10 @@ for _ in $(seq 1 60); do
   fi
   sleep 0.05
 done
+if [ -n "$parked" ] && [ "$tab_rename" = true ] && [ "$(label_of)" = "$tab_label" ] \
+  && "$herdr" tab rename "$tab" "vimnotate${tab_label:+: $tab_label}" >/dev/null 2>&1; then
+  renamed="vimnotate${tab_label:+: $tab_label}"
+fi
 printf '\033[?1049h\033[?25l'
 before="$(stty size 2>/dev/null || true)"
 if [ "$zoomed" = true ] && [ -n "$me" ] && [ -n "$parked" ]; then
@@ -80,6 +101,7 @@ VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTAT
   VIMNOTATE_VIEW="$view" VIMNOTATE_ACTION_BAR="$action_bar" VIMNOTATE_RESTORE="$restore_on" \
   VIMNOTATE_KEY_COMMENT="$key_comment" VIMNOTATE_KEY_DELETE="$key_delete" VIMNOTATE_KEY_LOOKS_GOOD="$key_looks_good" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
+unrename
 restore
 [ -f "$reply" ] || exit 0
 grep -q '[^[:space:]]' "$reply" || exit 0

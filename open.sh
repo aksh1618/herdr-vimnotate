@@ -34,9 +34,17 @@ dir="$(mktemp -d "${TMPDIR:-/tmp}/herdr-vimnotate.XXXXXX")"
   || "$herdr" pane read "$pane" --source recent --format ansi --lines "$lines" >"$dir/thread.ansi" \
   || { rm -rf "$dir"; exit 1; }
 printf '%s' "$ctx" | jq -r '.selected_text // empty' >"$dir/selected.txt"
+tabs="$("$herdr" tab list --workspace "$workspace" 2>/dev/null)" || tabs=""
+tab_position="$(printf '%s' "$tabs" | jq -r --arg t "$tab" '[.result.tabs[].tab_id] | index($t) // empty | . + 1' 2>/dev/null)" || tab_position=""
+tab_label="$(printf '%s' "$tabs" | jq -r --arg t "$tab" '.result.tabs[] | select(.tab_id == $t) | .label' 2>/dev/null)" || tab_label=""
+rename=false
+if [ -n "$tab_position" ] && [ "$tab_label" != "$tab_position" ]; then
+  rename=true
+fi
 zoomed="$("$herdr" pane layout --pane "$pane" 2>/dev/null | jq -r '.result.layout.zoomed // false')" || zoomed=false
 resp="$("$herdr" plugin pane open --plugin "${HERDR_PLUGIN_ID:?}" --entrypoint vimnotate --placement tab --workspace "$workspace" --no-focus \
-  --env "VIMNOTATE_DIR=$dir" --env "VIMNOTATE_TARGET_PANE=$pane" --env "VIMNOTATE_TAB=$tab" --env "VIMNOTATE_ZOOMED=$zoomed")" || { rm -rf "$dir"; exit 1; }
+  --env "VIMNOTATE_DIR=$dir" --env "VIMNOTATE_TARGET_PANE=$pane" --env "VIMNOTATE_TAB=$tab" --env "VIMNOTATE_ZOOMED=$zoomed" \
+  --env "VIMNOTATE_TAB_RENAME=$rename" --env "VIMNOTATE_TAB_LABEL=$tab_label")" || { rm -rf "$dir"; exit 1; }
 new="$(printf '%s' "$resp" | jq -r '.result.plugin_pane.pane.pane_id // empty')"
 [ -n "$new" ] || { rm -rf "$dir"; exit 1; }
 if [ "$zoomed" = true ]; then
@@ -46,4 +54,4 @@ if ! "$herdr" pane move "$new" --tab "$tab" --target-pane "$pane" --split down -
   [ "$zoomed" != true ] || "$herdr" pane zoom "$pane" --on >/dev/null || true
   exit 1
 fi
-"$herdr" pane move "$pane" --new-tab --workspace "$workspace" --no-focus --label "vimnotate · parked" >/dev/null
+"$herdr" pane move "$pane" --new-tab --workspace "$workspace" --no-focus --label "${tab_label:+$tab_label }[parked by vimnotate]" >/dev/null

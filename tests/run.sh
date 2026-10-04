@@ -293,6 +293,7 @@ for c in bash dirname sha256sum cut tr seq jq sleep stty cat grep awk rm env sor
   ln -s "$(command -v "$c")" "$lk/bin/$c"
 done
 cp "$pp/bin/nvim" "$lk/bin/nvim"
+printf '%s\n' '[ -z "${LK_RENAME:-}" ] || echo "$LK_RENAME" >"$LK_DIR/label"' >>"$lk/bin/nvim"
 cat >"$lk/bin/herdr" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$LK_LOG"
@@ -305,6 +306,9 @@ case "$*" in
   "plugin pane open "*) echo '{"result":{"plugin_pane":{"pane":{"pane_id":"pv"}}}}' ;;
   "pane move p1 --new-tab "*) echo tp >"$LK_DIR/tab" ;;
   "pane move p1 --tab "*) echo t1 >"$LK_DIR/tab" ;;
+  "tab get t1") jq -nc --arg l "$(cat "$LK_DIR/label")" '{result:{tab:{tab_id:"t1",label:$l,number:3}}}' ;;
+  "tab list --workspace w1") jq -nc --arg l "$(cat "$LK_DIR/label")" '{result:{tabs:[{tab_id:"t0",label:"1",number:1},{tab_id:"t1",label:$l,number:3}]}}' ;;
+  "tab rename t1 "*) shift 3; echo "$*" >"$LK_DIR/label" ;;
 esac
 EOF
 chmod +x "$lk/bin/herdr"
@@ -313,6 +317,7 @@ lk_open() {
   : >"$LK_LOG"
   echo t1 >"$lk/tab"
   echo "$1" >"$lk/zoomed"
+  printf '%s\n' "${2-2}" >"$lk/label"
   PATH="$lk/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA HERDR_PLUGIN_ID=x XDG_STATE_HOME="$lk/xdg" \
     HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"p1"}' TMPDIR="$lk" "$plugin/open.sh" >/dev/null 2>&1
 }
@@ -320,27 +325,47 @@ lk_pane() {
   : >"$LK_LOG"
   echo tp >"$lk/tab"
   echo false >"$lk/zoomed"
+  printf '%s\n' "${2-2}" >"$lk/label"
   rm -rf "${lk:?}/run"
   mkdir -p "$lk/run"
   : >"$lk/run/visible.ansi"
   PATH="$lk/bin" HERDR_BIN_PATH=herdr HERDR_SOCKET_PATH=/tmp/sockA HERDR_PANE_ID=pv XDG_STATE_HOME="$lk/xdg" \
-    VIMNOTATE_DIR="$lk/run" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_TAB=t1 VIMNOTATE_ZOOMED="$1" \
+    VIMNOTATE_DIR="$lk/run" VIMNOTATE_TARGET_PANE=p1 VIMNOTATE_TAB=t1 VIMNOTATE_ZOOMED="$1" VIMNOTATE_TAB_LABEL="${3-}" VIMNOTATE_TAB_RENAME="${4:-false}" \
     "$plugin/herdr-vimnotate.sh" >/dev/null 2>&1
 }
 calls() { grep -E '^pane (zoom|move)' "$LK_LOG" | tr '\n' ';'; }
 lk_open true
 got="$(calls)"
-check '[ "$got" = "pane zoom p1 --off;pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label vimnotate · parked;" ]' "open.sh unzooms a zoomed target before taking its slot (got: $got)"
+check '[ "$got" = "pane zoom p1 --off;pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label 2 [parked by vimnotate];" ]' "open.sh unzooms a zoomed target before taking its slot (got: $got)"
 check 'grep -q "VIMNOTATE_ZOOMED=true" "$LK_LOG"' "open.sh tells the pane the target was zoomed"
 lk_open false
 got="$(calls)"
-check '[ "$got" = "pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label vimnotate · parked;" ]' "open.sh leaves an unzoomed target's zoom alone (got: $got)"
+check '[ "$got" = "pane move pv --tab t1 --target-pane p1 --split down --focus;pane move p1 --new-tab --workspace w1 --no-focus --label 2 [parked by vimnotate];" ]' "open.sh leaves an unzoomed target's zoom alone (got: $got)"
 lk_pane true
 got="$(calls)"
 check '[ "$got" = "pane zoom pv --on;pane zoom pv --off;pane move p1 --tab t1 --target-pane pv --split down --focus;pane move pv --new-tab --no-focus;pane zoom p1 --on;" ]' "a zoomed review hands the zoom back to the target (got: $got)"
 lk_pane false
 got="$(calls)"
 check '[ "$got" = "pane move p1 --tab t1 --target-pane pv --split down --focus;" ]' "an unzoomed review returns the target without zooming (got: $got)"
+check '! grep -q "^tab rename" "$LK_LOG"' "an auto-named tab is never renamed"
+lk_open false build
+check 'grep -q -- "--label build \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL=build\$" "$LK_LOG"' "open.sh names the parked tab after a labelled tab"
+lk_open false
+check 'grep -q "VIMNOTATE_TAB_RENAME=false" "$LK_LOG"' "open.sh treats a tab labelled with its position as auto-named"
+lk_open false 3
+check 'grep -q "VIMNOTATE_TAB_RENAME=true" "$LK_LOG"' "open.sh compares the label with the tab's position, not its stable number"
+lk_open false ""
+check 'grep -q -- "--label \\[parked by vimnotate\\]" "$LK_LOG" && grep -q "VIMNOTATE_TAB_RENAME=true --env VIMNOTATE_TAB_LABEL=\$" "$LK_LOG"' "open.sh keeps an explicitly empty label"
+lk_pane false build build true
+got="$(grep "^tab rename" "$LK_LOG" | tr '\n' ';')"
+check '[ "$got" = "tab rename t1 vimnotate: build;tab rename t1 build;" ] && [ "$(cat "$lk/label")" = build ]' "a labelled tab is renamed while annotating and restored after (got: $got)"
+lk_pane false "" "" true
+got="$(grep "^tab rename" "$LK_LOG" | tr '\n' ';')"
+check '[ "$got" = "tab rename t1 vimnotate;tab rename t1 ;" ]' "an empty label becomes vimnotate and comes back empty (got: $got)"
+lk_pane false other build true
+check '! grep -q "^tab rename" "$LK_LOG" && [ "$(cat "$lk/label")" = other ]' "a tab renamed before the review starts is left alone"
+LK_RENAME=mine lk_pane false build build true
+check '[ "$(cat "$lk/label")" = mine ]' "a tab the user renamed mid-review keeps the user's name"
 
 empty() { awk -f "$plugin/composer-empty.awk"; }
 r="\033[90m────────\033[0m"

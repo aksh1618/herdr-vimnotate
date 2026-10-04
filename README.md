@@ -177,6 +177,10 @@ Linking `VimnotateMsgArea` to `Normal` leaves the bottom row untinted. Use a lin
 
 How the pane's slot is taken and given back, how the thread is rendered, how the review is sent, how sent annotations are matched again, and how to run the tests: [docs/how-it-works.md](docs/how-it-works.md).
 
+### Where did my agent pane go?
+
+While you annotate, the agent pane is parked in a tab of its own, named `<tab> [parked by vimnotate]`, and the tab you're annotating in is renamed `vimnotate: <tab>`. If you navigate away and click the agent to come back, you land in the parked tab; your annotations are in the `vimnotate:` tab. When vimnotate exits the parked tab closes and your tab gets its name back, unless you renamed it yourself meanwhile. A tab herdr names automatically (by its position) is left unrenamed, because herdr has no way to hand a renamed tab back to automatic naming; its parked tab still says `<position> [parked by vimnotate]`. A tab with an empty label becomes `vimnotate` and its parked tab `[parked by vimnotate]`.
+
 ### Does it share anything with my everyday neovim?
 
 vimnotate loads your neovim config, but a review session keeps neovim's own state apart from your other neovim sessions:

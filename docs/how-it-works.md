@@ -9,7 +9,9 @@ herdr has no pane-local placement. `popup` is centred over everything, `overlay`
 1. **Capture first, split second.** `pane read --source visible` and `--source recent-unwrapped --format ansi` both run *before* anything moves, because a split resizes the target pane and rewraps its scrollback. Capture afterwards and you have recorded the wrong layout.
 2. Open the plugin pane in a temporary tab, unfocused.
 3. `pane move` it into the target's tab, split below the target, focused.
-4. `pane move` the *target* out into its own tab, labelled `vimnotate · parked`.
+4. `pane move` the *target* out into its own tab, labelled `<tab> [parked by vimnotate]`, and rename the target's tab `vimnotate: <tab>`.
+
+**Tab names.** herdr's `tab rename` always sets a fixed label, and nothing clears one, so a tab herdr names by its position can't be handed back to automatic naming. A tab whose label equals its position in `tab list` is treated as automatic and isn't renamed, since restoring the position would freeze it and go stale once tabs move or close. (`tab get`'s `number` is a stable id, not the position.) A labelled tab is renamed only if its label is still the one captured at open, and gets it back on exit unless the user renamed it during the review.
 
 The vimnotate pane is now the only pane in that slot, at the target's dimensions. On exit the target is moved back in beside it and the vimnotate pane closes, leaving the target in its old slot. Pane ids, processes, scrollback and labels all survive; nothing is recreated.
 

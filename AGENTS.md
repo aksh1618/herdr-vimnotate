@@ -2,13 +2,15 @@
 
 A herdr plugin that opens the focused pane's scrollback in nvim, in that pane's own layout slot, lets the user annotate it with vim motions, and pastes the review unsubmitted into the agent's composer. The README is the user-facing spec (keys, send format, settings); this file is for changing the code.
 
+Machine-specific notes, if present: @AGENTS.local.md
+
 ## Files
 
 - `open.sh`: the plugin action. Expires old restore state, captures `lines` of the pane (`visible` + `recent-unwrapped` ANSI), opens the plugin pane, does the two `pane move`s.
 - `herdr-vimnotate.sh`: the plugin pane. Alternate screen, geometry re-apply, runs nvim (handing it `view`, `action_bar` and `restore` as `VIMNOTATE_VIEW`, `VIMNOTATE_ACTION_BAR`, `VIMNOTATE_RESTORE`), moves the target back, sends the review or falls back to the clipboard.
 - `vimnotate.lua`: the whole nvim session. Module table `M`, registered as `require("vimnotate")`.
 - `config.awk`: the one reader of `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. `awk -v key=<name> -f config.awk <file>` prints that key's value, or its default when missing or invalid. Both scripts use it; nvim never reads the file.
-- `composer-empty.awk`: decides whether a Claude Code composer is empty (a lone `❯` between two rules).
+- `composer-empty.awk`: decides whether the agent's composer is empty, from the shapes Claude Code, pi and Codex draw. Anything it does not recognise counts as non-empty.
 - `tests/`: `run.sh` runs `cases.lua` through `lib.lua` in headless `nvim --clean`.
 
 ## Test
@@ -31,7 +33,7 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 ## Code rules
 
 - **No comments in code.** Rationale goes in commit messages or the README.
-- **`vimnotate.lua` is at Lua's 200-locals-per-chunk limit** (about 192 top-level `local`s). Exceeding it breaks loading with "more than 200 local variables", and every test then times out. Put new helpers in an existing table (`M`, `pin`, `bars`, `H`) rather than adding top-level locals. Splitting the file into modules is the real fix.
+- **`vimnotate.lua` is close to Lua's 200-locals-per-chunk limit.** Exceeding it breaks loading with "more than 200 local variables", and every test then times out. Put new helpers in an existing table (`M`, `pin`, `bars`, `H`) rather than adding top-level locals. Splitting the file into modules is the real fix.
 - **Change annotations only through the store** (`M.annotations`: `add`/`update`/`remove`). Undo, the location list, the winbar, the rail and the inline boxes all hang off `on_change`; editing extmarks directly bypasses all of them.
 - **Every new thread key goes into `M.TRIGGERS`.** `unshadow_triggers()` deletes global maps that extend a trigger (a surround plugin's `cs`, `ds`), because a buffer-local exact match does not escape the `timeoutlen` wait. It re-runs, coalesced, after every lazy.nvim `LazyLoad`. Maps are also `nowait`.
 - **Keep `.` working.** Operators go through `operatorfunc`/`g@`. After a compose popup closes, `M.restore_repeat()` replays the operator so `.` points back at it instead of at the popup's insert.
@@ -54,9 +56,9 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 - Headless `feedkeys(…, "mx")` ends insert mode when the keys run out. Code run via `vim.schedule` needs a `vim.wait` before checking.
 - `nvim_input_mouse` only works between scheduled steps (`T.mouse` spaces them).
 - termctrl: `resize` doesn't reach nvim, so use `:set columns=`; sleep ~0.3 s after `escape` before a mouse event, or it arrives as Alt-click; letters go as `text:j`.
-- The user's config sets `cmdheight=0` (echo is invisible), `scrolloff=8`, and lazy-loads maps such as nvim-spider's `cw`.
+- A user's nvim config can set `cmdheight=0` (echo invisible), a non-zero `scrolloff`, and lazy-loaded maps that extend thread keys.
 - `herdr pane get` writes its error JSON to stderr.
-- Match processes by exe path, not `pkill -f`, which matches your own shell. `rm` is aliased to `rm -I`, so use `command rm` in scripts.
+- Match processes by exe path, not `pkill -f`, which matches your own shell.
 
 ## Demo video
 

@@ -4,18 +4,25 @@ local A = store.A
 local KINDS = core.KINDS
 
 local dw = vim.fn.strdisplaywidth
+local function sw(s)
+  local n = vim.api.nvim_strwidth(s)
+  for _ in s:gmatch("[%z\1-\8\10-\31\127]") do
+    n = n + 1
+  end
+  return n
+end
 
 local function chars(s)
   return vim.fn.split(s, "\\zs")
 end
 
 local function truncate(s, width)
-  if dw(s) <= width then
+  if sw(s) <= width then
     return s
   end
   local out, w = {}, 0
   for _, ch in ipairs(chars(s)) do
-    local cw = dw(ch)
+    local cw = sw(ch)
     if w + cw > width - 1 then
       break
     end
@@ -23,6 +30,15 @@ local function truncate(s, width)
     w = w + cw
   end
   return table.concat(out) .. "…"
+end
+
+local function cells(s)
+  local ts = math.max(vim.go.tabstop, 1)
+  local col = 0
+  for _, ch in ipairs(chars(s)) do
+    col = col + (ch == "\t" and ts - col % ts or sw(ch))
+  end
+  return col
 end
 
 local function wrap_text(text, width)
@@ -44,7 +60,7 @@ local function wrap_text(text, width)
       if ch == "\t" then
         return ts - (base + at) % ts
       end
-      return dw(ch)
+      return sw(ch)
     end
     local function newline()
       out[#out + 1] = table.concat(row)
@@ -97,18 +113,18 @@ end
 
 local function frame(title, accent, lines, text_hl, width, edge, fit)
   if fit then
-    local w = dw(title) + 4
+    local w = sw(title) + 4
     for _, l in ipairs(lines) do
-      w = math.max(w, dw(l) + 4)
+      w = math.max(w, sw(l) + 4)
     end
     width = math.min(width, w)
   end
   title = truncate(title, width - 2)
-  local tw = dw(title)
+  local tw = sw(title)
   local rows = { { { "╭", edge }, { title, accent }, { string.rep("─", width - 2 - tw) .. "╮", edge } } }
   for _, l in ipairs(lines) do
     l = truncate(l, width - 4)
-    rows[#rows + 1] = { { "│ ", edge }, { l .. string.rep(" ", width - 4 - dw(l)), text_hl }, { " │", edge } }
+    rows[#rows + 1] = { { "│ ", edge }, { l .. string.rep(" ", width - 4 - sw(l)), text_hl }, { " │", edge } }
   end
   rows[#rows + 1] = { { "╰" .. string.rep("─", width - 2) .. "╯", edge } }
   return rows
@@ -141,6 +157,7 @@ end
 
 return {
   dw = dw,
+  cells = cells,
   chars = chars,
   truncate = truncate,
   wrap_text = wrap_text,

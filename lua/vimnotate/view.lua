@@ -86,7 +86,16 @@ local function inline_render()
         for _ = 1, c.rows - 2 do
           blank[#blank + 1] = ""
         end
-        for _, row in ipairs(frame(c.title or "", "VimnotateTitle", blank, nil, width, KINDS[c.kind].hl .. "Border", false)) do
+        local fw = math.min(c.width + 4, width)
+        local titles = c.titles or { "" }
+        local title = titles[#titles]
+        for _, t in ipairs(titles) do
+          if boxes.cells(t) <= fw - 2 then
+            title = t
+            break
+          end
+        end
+        for _, row in ipairs(frame(title, "VimnotateTitle", blank, nil, fw, KINDS[c.kind].hl .. "Border", false)) do
           table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
           table.insert(groups[erow], row)
         end
@@ -158,24 +167,57 @@ local function reveal(tw, c)
   end
 end
 
+local function compose_preview(c, maxw)
+  local body = table.concat(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false), "\n")
+  local item = c.item
+  local preview = {
+    kind = c.kind,
+    id = item and item.id or "anno_00000",
+    body = body,
+    sent = item and item.sent and c.kind == item.kind and vim.trim(body) == item.body or nil,
+  }
+  return bubble(preview, maxw, "VimnotateEdge", true)
+end
+
+function M.compose_width(c)
+  local info = vim.fn.getwininfo(thread_win())[1]
+  local maxw = box_width(info)
+  if not c.inline then
+    c.width = math.max(1, math.min(c.base_width, info.width - 2))
+    return c.width
+  end
+  local full = math.max(1, maxw - 4)
+  local width = full
+  if c.buf and vim.api.nvim_buf_is_valid(c.buf) then
+    width = 0
+    for _, chunk in ipairs(compose_preview(c, maxw)[1]) do
+      width = width + boxes.cells(chunk[1])
+    end
+    width = width - 4
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false)) do
+      width = math.max(width, boxes.cells(line))
+    end
+    if c.win and vim.api.nvim_get_current_win() == c.win and vim.api.nvim_get_mode().mode:sub(1, 1) == "i" then
+      local row, col = unpack(vim.api.nvim_win_get_cursor(c.win))
+      local line = vim.api.nvim_buf_get_lines(c.buf, row - 1, row, false)[1] or ""
+      if line ~= "" and col >= #line then
+        width = math.max(width, boxes.cells(line) + 1)
+      end
+    end
+  end
+  c.width = math.max(1, math.min(width, full))
+  return c.width
+end
+
 function M.compose_layout(c)
   local tw = thread_win()
   local info = vim.fn.getwininfo(tw)[1]
   local r = c.range
   local maxw = box_width(info)
-  if c.inline then
-    c.width = math.max(1, maxw - 4)
-  else
-    c.width = math.max(1, math.min(c.base_width, info.width - 2))
-  end
+  M.compose_width(c)
   local rows = c.height + 2
   if c.inline and c.buf and vim.api.nvim_buf_is_valid(c.buf) then
-    local preview = {
-      kind = c.kind,
-      id = c.item and c.item.id or "anno_00000",
-      body = table.concat(vim.api.nvim_buf_get_lines(c.buf, 0, -1, false), "\n"),
-    }
-    rows = math.max(rows, #bubble(preview, maxw, "VimnotateEdge", true))
+    rows = math.max(rows, #compose_preview(c, maxw))
   end
   c.rows = rows
   render_view()

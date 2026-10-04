@@ -600,7 +600,8 @@ function C.compose_full_row(V)
   local steps = {
     { "cc", function()
       c = V.composing()
-      w = vim.api.nvim_win_get_width(c.win)
+      local info = vim.fn.getwininfo(V.thread_win())[1]
+      w = info.width - info.textoff - 6
       vim.api.nvim_input("a" .. string.rep("x", w - 2))
     end },
     { nil, function()
@@ -1132,112 +1133,6 @@ function C.keys_prefix(V, A)
   end, 50)
 end
 
-function C.compose_box_wrap(V)
-  local c, region, before
-  local function grab()
-    vim.cmd("redraw")
-    local out = {}
-    for r = region.top, region.bottom do
-      local line = ""
-      for col = region.left, region.right do
-        line = line .. vim.fn.screenstring(r, col)
-      end
-      out[#out + 1] = line
-    end
-    return out
-  end
-  local steps = {
-    { "cc", function()
-      c = V.composing()
-      local body = string.rep("abcd ", math.floor(c.width / 5)) .. string.rep("w", c.width % 5)
-      vim.api.nvim_input(body .. " tail of the comment")
-    end },
-    { "<Esc>", function()
-      local pos = vim.api.nvim_win_get_position(c.win)
-      T.eq({ vim.api.nvim_win_get_config(c.win).border, c.height }, { "none", 2 }, "inline compose: borderless float, two rows")
-      region = { top = pos[1] + 1, bottom = pos[1] + 2, left = pos[2] - 1, right = pos[2] + c.width + 2 }
-      before = grab()
-      T.eq({ vim.fn.strcharpart(before[1], 0, 2), vim.fn.strcharpart(before[1], vim.fn.strchars(before[1]) - 2) }, { "│ ", " │" }, "frame drawn around the float")
-    end },
-    { "<CR>", function()
-      T.eq(V.composing(), nil, "saved")
-      T.eq(grab(), before, "box rows match the compose rows cell for cell")
-      T.eq(#T.items(), 1, "one comment")
-    end },
-  }
-  local i = 0
-  local function nxt()
-    i = i + 1
-    local s = steps[i]
-    if not s then
-      return T.finish("Cancel")
-    end
-    if i == 1 then
-      T.cursor(1)
-    end
-    vim.api.nvim_input(s[1])
-    vim.defer_fn(function()
-      local ok, err = pcall(s[2])
-      if not ok then
-        T.ok(false, "step " .. i .. ": " .. tostring(err))
-        return T.finish("Cancel")
-      end
-      vim.defer_fn(nxt, 30)
-    end, 60)
-  end
-  vim.defer_fn(nxt, 300)
-end
-
-function C.wrap_matches_nvim()
-  local wrap_text = require("vimnotate.boxes").wrap_text
-  local function nvim_rows(text, width)
-    local b = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(b, 0, -1, false, { text })
-    local w = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, width = width, height = 20, style = "minimal" })
-    vim.wo[w].wrap = true
-    vim.wo[w].linebreak = true
-    vim.cmd("redraw")
-    local rows = {}
-    for r = 1, vim.api.nvim_win_text_height(w, {}).all do
-      local l = ""
-      for col = 1, width do
-        l = l .. vim.fn.screenstring(r, col)
-      end
-      rows[#rows + 1] = l
-    end
-    vim.api.nvim_win_close(w, true)
-    vim.api.nvim_buf_delete(b, { force = true })
-    return rows
-  end
-  local function box_rows(text, width)
-    return vim.tbl_map(function(l)
-      return l .. string.rep(" ", width - vim.fn.strdisplaywidth(l))
-    end, wrap_text(text, width))
-  end
-  local cases = {
-    { "dddd ffffff end. dddd eeeee end. x,y a ffffff", 16 },
-    { "bb ccc bb foo-bar foo-bar bb end. ffffff bb", 9 },
-    { "   verylongwordthatexceeds bb foo-bar", 16 },
-    { "- ffffff bb foo-bar a.b.c", 8 },
-    { "très 日本語 x,y end. a.b.c ccc dddd", 10 },
-    { "aaaa  bbbb   cccc dddd", 9 },
-    { "abc\tdef xyz", 12 },
-    { "a\tb\tc d", 10 },
-    { "e\204\129e\204\129e\204\129 xyz", 4 },
-    { "日本語日本語", 5 },
-    { "", 5 },
-    { "ends at the edge-", 8 },
-  }
-  for _, case in ipairs(cases) do
-    T.eq(box_rows(case[1], case[2]), nvim_rows(case[1], case[2]), "wraps like nvim: " .. case[1] .. " @" .. case[2])
-  end
-  local saved = vim.go.breakat
-  vim.go.breakat = " "
-  T.eq(box_rows("foo-bar baz-qux zz", 9), nvim_rows("foo-bar baz-qux zz", 9), "custom breakat")
-  vim.go.breakat = saved
-  T.finish("Cancel")
-end
-
 function C.hint_show(V)
   local bar = V.bars.hint
   local tw = V.thread_win()
@@ -1335,6 +1230,394 @@ function C.item_shown_edges(V)
   at(25 - (h - 2))
   T.eq(V.item_shown(a), false, "rail: bubble one row lower is cut")
   T.finish("Cancel")
+end
+
+function C.compose_box_wrap(V)
+  local c, region, before
+  local function grab()
+    vim.cmd("redraw")
+    local out = {}
+    for r = region.top, region.bottom do
+      local line = ""
+      for col = region.left, region.right do
+        line = line .. vim.fn.screenstring(r, col)
+      end
+      out[#out + 1] = line
+    end
+    return out
+  end
+  local steps = {
+    { "cc", function()
+      c = V.composing()
+      local info = vim.fn.getwininfo(V.thread_win())[1]
+      local full = info.width - info.textoff - 6
+      local body = string.rep("abcd ", math.floor(full / 5)) .. string.rep("w", full % 5)
+      vim.api.nvim_input(body .. " tail of the comment")
+    end },
+    { "<Esc>", function()
+      local pos = vim.api.nvim_win_get_position(c.win)
+      T.eq({ vim.api.nvim_win_get_config(c.win).border, c.height }, { "none", 2 }, "inline compose: borderless float, two rows")
+      region = { top = pos[1] + 1, bottom = pos[1] + 2, left = pos[2] - 1, right = pos[2] + c.width + 2 }
+      before = grab()
+      T.eq({ vim.fn.strcharpart(before[1], 0, 2), vim.fn.strcharpart(before[1], vim.fn.strchars(before[1]) - 2) }, { "│ ", " │" }, "frame drawn around the float")
+    end },
+    { "<CR>", function()
+      T.eq(V.composing(), nil, "saved")
+      T.eq(grab(), before, "box rows match the compose rows cell for cell")
+      T.eq(#T.items(), 1, "one comment")
+    end },
+  }
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local s = steps[i]
+    if not s then
+      return T.finish("Cancel")
+    end
+    if i == 1 then
+      T.cursor(1)
+    end
+    vim.api.nvim_input(s[1])
+    vim.defer_fn(function()
+      local ok, err = pcall(s[2])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      vim.defer_fn(nxt, 30)
+    end, 60)
+  end
+  vim.defer_fn(nxt, 300)
+end
+
+function C.wrap_matches_nvim()
+  local wrap_text = require("vimnotate.boxes").wrap_text
+  local function nvim_rows(text, width)
+    local b = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { text })
+    local w = vim.api.nvim_open_win(b, false, { relative = "editor", row = 0, col = 0, width = width, height = 20, style = "minimal" })
+    vim.wo[w].wrap = true
+    vim.wo[w].linebreak = true
+    vim.cmd("redraw")
+    local rows = {}
+    for r = 1, vim.api.nvim_win_text_height(w, {}).all do
+      local l = ""
+      for col = 1, width do
+        l = l .. vim.fn.screenstring(r, col)
+      end
+      rows[#rows + 1] = l
+    end
+    vim.api.nvim_win_close(w, true)
+    vim.api.nvim_buf_delete(b, { force = true })
+    return rows
+  end
+  local function box_rows(text, width)
+    return vim.tbl_map(function(l)
+      return l .. string.rep(" ", width - vim.fn.strdisplaywidth(l))
+    end, wrap_text(text, width))
+  end
+  local cases = {
+    { "dddd ffffff end. dddd eeeee end. x,y a ffffff", 16 },
+    { "bb ccc bb foo-bar foo-bar bb end. ffffff bb", 9 },
+    { "   verylongwordthatexceeds bb foo-bar", 16 },
+    { "- ffffff bb foo-bar a.b.c", 8 },
+    { "très 日本語 x,y end. a.b.c ccc dddd", 10 },
+    { "aaaa  bbbb   cccc dddd", 9 },
+    { "abc\tdef xyz", 12 },
+    { "a\tb\tc d", 10 },
+    { "e\204\129e\204\129e\204\129 xyz", 4 },
+    { "日本語日本語", 5 },
+    { "", 5 },
+    { "ends at the edge-", 8 },
+  }
+  for _, case in ipairs(cases) do
+    T.eq(box_rows(case[1], case[2]), nvim_rows(case[1], case[2]), "wraps like nvim: " .. case[1] .. " @" .. case[2])
+  end
+  local saved = vim.go.breakat
+  vim.go.breakat = " "
+  T.eq(box_rows("foo-bar baz-qux zz", 9), nvim_rows("foo-bar baz-qux zz", 9), "custom breakat")
+  vim.go.breakat = saved
+  T.finish("Cancel")
+end
+
+function C.compose_box_fit(V)
+  local c, region, before
+  local function grab()
+    vim.cmd("redraw")
+    local out = {}
+    for r = region.top, region.bottom do
+      local line = ""
+      for col = region.left, region.right do
+        line = line .. vim.fn.screenstring(r, col)
+      end
+      out[#out + 1] = line
+    end
+    return out
+  end
+  local note = "a slightly longer note"
+  local steps = {
+    { "cc", function()
+      c = V.composing()
+      T.eq({ vim.api.nvim_get_mode().mode, vim.api.nvim_win_get_width(c.win) }, { "i", 10 }, "empty: the box's minimum width")
+    end },
+    { "short", function()
+      T.eq(vim.api.nvim_win_get_width(c.win), 10, "a short note keeps the minimum")
+    end },
+    { "<C-u>" .. note, function()
+      T.eq(vim.api.nvim_win_get_width(c.win), #note + 1, "insert at the end leaves a cursor cell")
+    end },
+    { "<Esc>", function()
+      T.eq(vim.api.nvim_win_get_width(c.win), #note, "normal mode fits the text")
+      local pos = vim.api.nvim_win_get_position(c.win)
+      region = { top = pos[1] + 1, bottom = pos[1] + 2, left = pos[2] - 1, right = pos[2] + #note + 6 }
+      before = grab()
+      T.eq(before[2]:sub(1, 3), "╰", "frame ends under the text")
+    end },
+    { "<CR>", function()
+      T.eq(V.composing(), nil, "saved")
+      T.eq(grab(), before, "box matches the compose frame cell for cell")
+    end },
+  }
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local s = steps[i]
+    if not s then
+      return T.finish("Cancel")
+    end
+    if i == 1 then
+      T.cursor(1)
+    end
+    vim.api.nvim_input(s[1])
+    vim.defer_fn(function()
+      local ok, err = pcall(s[2])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      vim.defer_fn(nxt, 30)
+    end, 60)
+  end
+  vim.defer_fn(nxt, 300)
+end
+
+function C.compose_fit_edges(V)
+  local c, region, before
+  local function grab()
+    vim.cmd("redraw")
+    local out = {}
+    for r = region.top, region.bottom do
+      local line = ""
+      for col = region.left, region.right do
+        line = line .. vim.fn.screenstring(r, col)
+      end
+      out[#out + 1] = line
+    end
+    return out
+  end
+  local steps = {
+    { "", function()
+      T.add(2, "comment", "short", true)
+    end },
+    { "", function()
+      T.cursor(2)
+      T.eq(V.view.mode, "inline", "inline view")
+    end },
+    { "e", function()
+      c = V.composing()
+      T.eq(c and c.item and c.item.sent, true, "editing a sent comment")
+    end },
+    { "<Esc>", function()
+      local pos = vim.api.nvim_win_get_position(c.win)
+      region = { top = pos[1], bottom = pos[1] + 2, left = pos[2] - 1, right = pos[2] + 30 }
+      T.eq(vim.api.nvim_win_get_width(c.win), vim.fn.strdisplaywidth(" 💬 " .. V.annotations.short_id(c.item.id) .. " · sent "), "sent title sets the width")
+      before = grab()
+    end },
+    { "<CR>", function()
+      T.eq(T.items()[1].sent, true, "unchanged edit stays sent")
+      local after = grab()
+      T.eq({ after[2], after[3] }, { before[2], before[3] }, "unchanged sent edit: box matches the frame")
+      T.cursor(4)
+    end },
+    { "cc" .. string.rep(" ", 25) .. "short<Esc>", function()
+      c = V.composing()
+      T.eq({ c.height, vim.api.nvim_win_get_width(c.win) }, { 1, 30 }, "leading spaces fit on one row")
+    end },
+  }
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local s = steps[i]
+    if not s then
+      return T.finish("Cancel")
+    end
+    if s[1] ~= "" then
+      vim.api.nvim_input(s[1])
+    end
+    vim.defer_fn(function()
+      local ok, err = pcall(s[2])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      vim.defer_fn(nxt, 30)
+    end, 60)
+  end
+  vim.defer_fn(nxt, 300)
+end
+
+function C.compose_others_stable(V)
+  local snaps = {}
+  local function screen()
+    vim.cmd("redraw")
+    local out = {}
+    for r = 1, vim.o.lines do
+      local l = ""
+      for col = 1, vim.o.columns do
+        l = l .. vim.fn.screenstring(r, col)
+      end
+      out[#out + 1] = l
+    end
+    return out
+  end
+  local steps = {
+    { "", function()
+      T.add(12, "comment", "first note that is fairly long")
+      T.add(10, "good")
+    end },
+    { "", function()
+      T.cursor(12)
+    end },
+    { "wcw", function()
+      T.eq(V.composing().item, nil, "a new comment on the same row")
+    end },
+  }
+  for ch in ("typing a third comment here"):gmatch(".") do
+    steps[#steps + 1] = { ch, function()
+      local top = vim.api.nvim_win_get_position(V.composing().win)[1] - 2
+      snaps[#snaps + 1] = vim.list_slice(screen(), 1, top)
+    end }
+  end
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local s = steps[i]
+    if not s then
+      local first = snaps[1]
+      local moved = {}
+      for k, snap in ipairs(snaps) do
+        for r = 2, #first do
+          if snap[r] ~= first[r] and not moved[r] then
+            moved[r] = { k, first[r], snap[r] }
+          end
+        end
+      end
+      T.eq(moved, {}, "rows above the compose stay put while typing")
+      T.ok(table.concat(first, "\n"):find("first note", 1, true) ~= nil, "the earlier box is on screen")
+      return T.finish("Cancel")
+    end
+    if s[1] ~= "" then
+      vim.api.nvim_input(s[1])
+    end
+    vim.defer_fn(function()
+      local ok, err = pcall(s[2])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      vim.defer_fn(nxt, 20)
+    end, 40)
+  end
+  vim.defer_fn(nxt, 300)
+end
+
+function C.box_control_chars()
+  local boxes = require("vimnotate.boxes")
+  local rows = boxes.bubble({ kind = "comment", id = "anno_00000", body = "a\1b and\127c" }, 40, "VimnotateEdge", true)
+  local widths = {}
+  for _, row in ipairs(rows) do
+    local t = ""
+    for _, chunk in ipairs(row) do
+      t = t .. chunk[1]
+    end
+    widths[#widths + 1] = vim.fn.strdisplaywidth(t)
+  end
+  T.eq(widths, { widths[1], widths[1], widths[1] }, "control characters count as their ^X cells")
+  T.finish("Cancel")
+end
+
+function C.compose_title_hints(V)
+  local full = {
+    " comment · enter saves · ctrl-j new line · esc normal ",
+    " comment · enter saves · ctrl-j new line ",
+    " comment · enter saves ",
+    " 💬 comment ",
+    " comment ",
+  }
+  local rank = {}
+  for k, t in ipairs(full) do
+    rank[t] = k
+  end
+  local seen, order = {}, {}
+  local function title()
+    local ns = vim.api.nvim_get_namespaces()["vimnotate.inline"]
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(V.thread, ns, 0, -1, { details = true })) do
+      for _, row in ipairs(m[4].virt_lines or {}) do
+        for _, chunk in ipairs(row) do
+          if chunk[2] == "VimnotateTitle" then
+            return chunk[1]
+          end
+        end
+      end
+    end
+  end
+  local text = string.rep("x", 60)
+  local steps = { { "cc", function() end } }
+  for k = 1, #text do
+    steps[#steps + 1] = { text:sub(k, k), function()
+      local t = title()
+      if t ~= order[#order] then
+        order[#order + 1] = t
+      end
+      seen[t] = true
+    end }
+  end
+  steps[#steps + 1] = { "<Esc>", function()
+    T.eq(order, { full[4], full[3], full[2], full[1] }, "hints appear one by one as the frame grows")
+    T.eq(title(), " comment · enter saves · q cancels · i insert ", "normal mode hints")
+  end }
+  steps[#steps + 1] = { "q", function()
+    T.add(5, "good")
+    V.view.setting = "rail"
+    V.apply_view()
+  end }
+  steps[#steps + 1] = { "cc", function()
+    local c = V.composing()
+    local cfg = vim.api.nvim_win_get_config(c.win)
+    local t = type(cfg.title) == "table" and cfg.title[1][1] or cfg.title
+    T.eq({ V.view.mode, c.inline, c.width < vim.api.nvim_strwidth(full[1]), t }, { "rail", false, true, full[2] }, "rail view: the hints that fit the float")
+  end }
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local s = steps[i]
+    if not s then
+      return T.finish("Cancel")
+    end
+    if i == 1 then
+      T.cursor(1)
+    end
+    vim.api.nvim_input(s[1])
+    vim.defer_fn(function()
+      local ok, err = pcall(s[2])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      vim.defer_fn(nxt, 10)
+    end, 25)
+  end
+  vim.defer_fn(nxt, 300)
 end
 
 return C

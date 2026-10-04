@@ -17,15 +17,33 @@ local COMPOSE_MIN_WIDTH = 48
 local COMPOSE_MAX_ROWS = 8
 local compose = nil
 
-local function compose_title(c, insert)
+local COMPOSE_HINTS = {
+  insert = { "enter saves", "ctrl-j new line", "esc normal" },
+  normal = { "enter saves", "q cancels", "i insert" },
+}
+
+local function compose_titles(c, insert)
   local verb = (c.item and c.item.kind == c.kind) and "edit" or "comment"
   if insert == nil then
     insert = vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
   end
-  if insert then
-    return " " .. verb .. " · enter saves · ctrl-j new line · esc normal "
+  local hints = COMPOSE_HINTS[insert and "insert" or "normal"]
+  local titles = {}
+  for n = #hints, 1, -1 do
+    titles[#titles + 1] = " " .. verb .. " · " .. table.concat(hints, " · ", 1, n) .. " "
   end
-  return " " .. verb .. " · enter saves · q cancels · i insert "
+  titles[#titles + 1] = " " .. KINDS[c.kind].glyph .. " " .. verb .. " "
+  titles[#titles + 1] = " " .. verb .. " "
+  return titles
+end
+
+local function fit_title(titles, width)
+  for _, t in ipairs(titles) do
+    if vim.api.nvim_strwidth(t) <= width then
+      return t
+    end
+  end
+  return titles[#titles]
 end
 
 local function compose_body(c)
@@ -56,15 +74,19 @@ local function compose_resize(c, cursor_only)
   if not vim.api.nvim_win_is_valid(c.win) then
     return
   end
+  local w = c.width
+  if M.compose_width(c) ~= vim.api.nvim_win_get_width(c.win) then
+    vim.api.nvim_win_set_config(c.win, { width = c.width })
+  end
   local h = compose_rows(c)
-  if cursor_only and h == c.height then
+  if cursor_only and h == c.height and w == c.width then
     return
   end
   c.height = h
-  c.title = compose_title(c)
+  c.titles = compose_titles(c)
   local cfg = M.compose_layout(c)
   if not c.inline then
-    cfg.title = c.title
+    cfg.title = fit_title(c.titles, c.width)
     cfg.title_pos = "left"
   end
   if not vim.deep_equal(cfg, c.cfg) then
@@ -145,16 +167,15 @@ function M.compose(opts)
   local body = opts.body or (item and item.body) or ""
   vim.api.nvim_buf_set_lines(c.buf, 0, -1, false, vim.split(body, "\n", { plain = true }))
   compose = c
-  local title = compose_title(c, true)
-  c.base_width = math.max(COMPOSE_MIN_WIDTH, vim.fn.strdisplaywidth(title) + 2, vim.fn.strdisplaywidth(compose_title(c, false)) + 2)
-  c.title = title
+  c.titles = compose_titles(c, true)
+  c.base_width = math.max(COMPOSE_MIN_WIDTH, vim.api.nvim_strwidth(c.titles[1]) + 2, vim.api.nvim_strwidth(compose_titles(c, false)[1]) + 2)
   local cfg = M.compose_layout(c)
   cfg.style = "minimal"
   if c.inline then
     cfg.border = "none"
   else
     cfg.border = "rounded"
-    cfg.title = title
+    cfg.title = fit_title(c.titles, c.width)
     cfg.title_pos = "left"
   end
   c.win = vim.api.nvim_open_win(c.buf, true, cfg)

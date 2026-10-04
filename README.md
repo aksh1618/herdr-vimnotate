@@ -80,7 +80,7 @@ In the thread, with the default operator keys (see [Configuration](#configuratio
 - The comment compose popup is an ordinary vim buffer: `Enter` saves (in insert or normal mode), `Ctrl-j` inserts a new line, `Esc` goes to normal mode and `q` there cancels.
 - The note popup is a plain buffer too, but `Enter` is just a newline. `q` or `Tab` in normal mode hides it, and so does clicking back into the thread. Hiding never discards the note; only `:Cancel` does.
 - In the side rail: `j`/`k` move between annotations, `Enter` jumps to one in the thread, `e` edits, `x` removes, `Esc` or `Tab` goes back to the thread.
-- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels, each with its key. Resting the cursor on an annotation shows a hint bar for `e`, `x` and `K`.
+- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels, each with its key. Resting the cursor on an annotation shows a hint bar for `e` and `x`, plus `K` when the view isn't already showing that annotation's whole box.
 
 ## What gets sent
 

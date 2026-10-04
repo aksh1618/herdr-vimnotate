@@ -29,6 +29,7 @@ local RAIL_FORCE_MIN_THREAD = 40
 local INLINE_INDENT = 2
 local FLASH_MS = 2500
 local inline_ns = vim.api.nvim_create_namespace("vimnotate.inline")
+local inline_boxes = {}
 
 local Vw = {}
 
@@ -38,6 +39,7 @@ end
 
 local function inline_render()
   vim.api.nvim_buf_clear_namespace(thread, inline_ns, 0, -1)
+  inline_boxes = {}
   local tw = thread_win()
   if tw == -1 then
     return
@@ -70,7 +72,9 @@ local function inline_render()
     groups[erow] = groups[erow] or {}
     if e.item then
       local edge = accent_of(e.item) .. (e.item == sel and "Bold" or "")
-      for _, row in ipairs(bubble(e.item, width, edge, true)) do
+      local b = bubble(e.item, width, edge, true)
+      inline_boxes[e.item.id] = { erow = erow, offset = #groups[erow], rows = #b }
+      for _, row in ipairs(b) do
         table.insert(row, 1, { string.rep(" ", INLINE_INDENT) })
         table.insert(groups[erow], row)
       end
@@ -98,6 +102,31 @@ local function inline_render()
   view.last_sel = sel
 end
 M.inline_render = inline_render
+
+function M.item_shown(item)
+  local tw = thread_win()
+  if tw == -1 then
+    return false
+  end
+  if view.mode == "rail" then
+    for _, b in ipairs(view.bubbles or {}) do
+      if b.item == item then
+        return b.whole
+      end
+    end
+    return false
+  end
+  local box = view.mode == "inline" and inline_boxes[item.id]
+  if not box then
+    return false
+  end
+  local sv = vim.api.nvim_win_call(tw, vim.fn.winsaveview)
+  if box.erow < sv.topline - 1 then
+    return false
+  end
+  local above = vim.api.nvim_win_text_height(tw, { start_row = sv.topline - 1, start_vcol = sv.skipcol, end_row = box.erow }).all
+  return (sv.topfill or 0) + above + box.offset + box.rows <= vim.fn.getwininfo(tw)[1].height
+end
 
 local function render_view()
   inline_render()
@@ -224,6 +253,7 @@ local function apply_view()
   end
   render_view()
   view.applying = false
+  M.bars_refresh()
 end
 M.apply_view = apply_view
 

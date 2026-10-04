@@ -112,7 +112,7 @@ local function rail_render()
     return
   end
   local rw = view.rail_win
-  local width, height = vim.api.nvim_win_get_width(rw), vim.api.nvim_win_get_height(rw)
+  local width, height = vim.api.nvim_win_get_width(rw), vim.fn.getwininfo(rw)[1].height
   local sv = vim.api.nvim_win_call(tw, vim.fn.winsaveview)
   local top, skip = sv.topline - 1, sv.skipcol
   local bot = vim.fn.getwininfo(tw)[1].botline

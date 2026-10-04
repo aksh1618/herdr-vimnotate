@@ -196,13 +196,18 @@ local function hint_hide()
 end
 
 local function hint_render(item)
-  bar_render(bars.hint, bars.pieces({
+  local entries = {
     { glyph = "📝", label = "edit", key = "e", run = M.edit },
     { glyph = "🧹", label = "remove", key = "x", run = M.remove_at_cursor },
-    { glyph = "🔍", label = "show", key = "K", run = M.hover },
-  }, "VimnotateBar" .. KINDS[item.kind].hl:sub(10)))
+  }
+  local shown = M.item_shown(item)
+  if not shown then
+    entries[#entries + 1] = { glyph = "🔍", label = "show", key = "K", run = M.hover }
+  end
+  bar_render(bars.hint, bars.pieces(entries, "VimnotateBar" .. KINDS[item.kind].hl:sub(10)))
   bar_show(bars.hint, A.range(item))
   hint_item = item
+  bars.hint.shown = shown
 end
 
 local function hint_eligible()
@@ -246,13 +251,16 @@ local function bars_refresh()
     action_update()
   end
   if hint_item and bar_visible(bars.hint) then
-    if A.items[hint_item.id] then
-      bar_show(bars.hint, A.range(hint_item))
-    else
+    if not A.items[hint_item.id] then
       hint_hide()
+    elseif M.item_shown(hint_item) ~= bars.hint.shown then
+      hint_render(hint_item)
+    else
+      bar_show(bars.hint, A.range(hint_item))
     end
   end
 end
+M.bars_refresh = bars_refresh
 
 function M.bar_click()
   local run = B.pending_click

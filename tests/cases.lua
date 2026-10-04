@@ -883,11 +883,11 @@ function C.hint_bar(V)
   end, 300)
   vim.defer_fn(function()
     T.eq(bar.win ~= nil and vim.api.nvim_win_is_valid(bar.win), true, "hint bar shown on an annotation")
-    T.eq(vim.api.nvim_buf_get_lines(bar.buf, 0, -1, false)[1], " 📝 edit (e)  🧹 remove (x)  🔍 show (K) ", "hint bar text")
+    T.eq(vim.api.nvim_buf_get_lines(bar.buf, 0, -1, false)[1], " 📝 edit (e)  🧹 remove (x) ", "hint bar text, no show for a visible box")
     T.eq(vim.tbl_map(function(s)
       return { s.from, s.to, s.hl }
-    end, bar.spans), { { 0, 13, "VimnotateBarComment" }, { 13, 28, "VimnotateBarComment" }, { 28, 41, "VimnotateBarComment" } }, "hint spans by display width, in the accent colour")
-    T.eq(bar.width, 41, "hint bar width")
+    end, bar.spans), { { 0, 13, "VimnotateBarComment" }, { 13, 28, "VimnotateBarComment" } }, "hint spans by display width, in the accent colour")
+    T.eq({ bar.width, vim.api.nvim_win_get_width(bar.win) }, { 28, 28 }, "hint bar width")
     T.eq(V.bars.pieces({ { glyph = "👍", label = "looks good", key = "p" } }, "X")[1].text, " 👍 looks good (p) ", "shared piece format")
     local pos = vim.api.nvim_win_get_position(bar.win)
     local x = pos[2] + bar.spans[2].from + 6
@@ -1170,6 +1170,105 @@ function C.wrap_matches_nvim()
   vim.go.breakat = " "
   T.eq(box_rows("foo-bar baz-qux zz", 9), nvim_rows("foo-bar baz-qux zz", 9), "custom breakat")
   vim.go.breakat = saved
+  T.finish("Cancel")
+end
+
+function C.hint_show(V)
+  local bar = V.bars.hint
+  local tw = V.thread_win()
+  local function text()
+    if not (bar.win and vim.api.nvim_win_is_valid(bar.win)) then
+      return nil
+    end
+    return vim.api.nvim_buf_get_lines(bar.buf, 0, -1, false)[1]
+  end
+  local with = " 📝 edit (e)  🧹 remove (x)  🔍 show (K) "
+  local without = " 📝 edit (e)  🧹 remove (x) "
+  local row
+  local steps = {
+    function()
+      T.cursor(0)
+      row = vim.fn.getwininfo(tw)[1].botline - 1
+      T.add(row, "comment", "below the fold")
+      T.cursor(row - 1)
+      T.keys("j")
+    end,
+    function()
+      T.eq({ V.view.mode, text(), vim.api.nvim_win_get_width(bar.win) }, { "inline", with, 41 }, "box below the window: show offered")
+      vim.api.nvim_win_call(tw, function()
+        vim.cmd("normal! zt")
+      end)
+    end,
+    function()
+      T.eq(text(), without, "scrolled into view: show dropped")
+      V.view.setting = "off"
+      V.apply_view()
+    end,
+    function()
+      T.eq({ V.view.mode, text() }, { "off", with }, "view off: show offered")
+      V.view.setting = "rail"
+      V.apply_view()
+    end,
+    function()
+      T.eq({ V.view.mode, text() }, { "rail", without }, "rail showing the bubble: show dropped")
+      local pos = vim.api.nvim_win_get_position(bar.win)
+      local x = pos[2] + bar.spans[#bar.spans].from + 3
+      T.mouse({ { "press", pos[1], x }, { "release", pos[1], x } }, function()
+        T.eq(#T.items(), 0, "the last span is remove and clicks through")
+        T.finish("Cancel")
+      end)
+    end,
+  }
+  local i = 0
+  local function nxt()
+    i = i + 1
+    if steps[i] then
+      local ok, err = pcall(steps[i])
+      if not ok then
+        T.ok(false, "step " .. i .. ": " .. tostring(err))
+        return T.finish("Cancel")
+      end
+      if i < #steps then
+        vim.defer_fn(nxt, 400)
+      end
+    end
+  end
+  vim.defer_fn(nxt, 300)
+end
+
+function C.item_shown_edges(V)
+  local tw = V.thread_win()
+  local function at(top, topfill)
+    vim.api.nvim_win_call(tw, function()
+      vim.fn.winrestview({ topline = top + 1, topfill = topfill or 0, skipcol = 0 })
+    end)
+    V.apply_view()
+    return vim.api.nvim_win_call(tw, vim.fn.winsaveview).topfill
+  end
+  local a = T.add(25, "comment", "x")
+  T.cursor(0)
+  vim.wait(300, function()
+    return false
+  end)
+  T.eq(V.view.mode, "inline", "inline view")
+  local h = vim.fn.getwininfo(tw)[1].height
+  local top = 25 - (h - 4)
+  at(top)
+  T.eq(V.item_shown(a), true, "inline: bottom border on the last text row is shown")
+  at(top - 1)
+  T.eq(V.item_shown(a), false, "inline: bottom border one row below is not")
+  T.add(top - 1, "comment", "1\n2\n3\n4\n5")
+  T.eq({ at(top, 0), V.item_shown(a) }, { 0, true }, "inline: no filler above topline")
+  T.eq({ at(top, 1), V.item_shown(a) }, { 1, false }, "inline: a box tail above topline counts")
+  V.view.setting = "rail"
+  V.apply_view()
+  T.eq(V.view.mode, "rail", "rail view")
+  local rh = vim.fn.getwininfo(V.view.rail_win)[1].height
+  T.eq(rh, h, "rail text area matches the thread's")
+  at(25 - (h - 3))
+  T.eq(V.item_shown(a), true, "rail: bubble ending on the last text row is whole")
+  at(25 - (h - 2))
+  T.eq(V.item_shown(a), false, "rail: bubble one row lower is cut")
   T.finish("Cancel")
 end
 

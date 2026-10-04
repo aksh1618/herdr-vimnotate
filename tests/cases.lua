@@ -848,4 +848,172 @@ function C.hint_bar(V)
   end, 700)
 end
 
+function C.keys_resolve()
+  local core = require("vimnotate.core")
+  local function try(env)
+    local keys, warning = core.resolve_keys(env)
+    return { keys.comment .. keys.delete .. keys.good, warning ~= nil }
+  end
+  T.eq(try({}), { "cdp", false }, "no settings: defaults")
+  T.eq(try({ comment = "m", delete = "s", good = "a" }), { "msa", false }, "three free keys")
+  T.eq(try({ comment = "d", delete = "c" }), { "dcp", false }, "swapped defaults")
+  T.eq(try({ comment = "%", good = "i" }), { "%di", false }, "punctuation and i")
+  for _, bad in ipairs({ "aa", "", "é", " ", "\t", "<C-a>" }) do
+    T.eq(try({ good = bad }), { "cdp", true }, "not one printable character: " .. vim.inspect(bad))
+  end
+  for _, taken in ipairs({ "x", "e", "K", "u", "q", "R", "H", "L", "]", "[", "g", ".", ":", "v", "V", "0", "5" }) do
+    T.eq(try({ delete = taken }), { "cdp", true }, "taken: " .. taken)
+  end
+  T.eq(try({ comment = "p" }), { "cdp", true }, "duplicate with a default")
+  T.eq(try({ comment = "m", delete = "m", good = "a" }), { "cdp", true }, "duplicate among the three")
+  local _, w = core.resolve_keys({ good = "x", comment = "d" })
+  T.eq(w, 'keys.looks_good "x" clashes with x; keys.comment and keys.delete are both "d"; using the default keys', "warning text")
+  local triggers = require("vimnotate").TRIGGERS
+  local missing = {}
+  for _, lhs in ipairs(triggers.n) do
+    local k = vim.keycode(lhs):sub(1, 1)
+    if #lhs > 0 and not vim.tbl_contains({ "c", "C", "d", "p" }, lhs) and lhs:match("^[!-~]") and lhs ~= "<LeftMouse>" and not select(2, core.resolve_keys({ good = k })) then
+      missing[#missing + 1] = lhs
+    end
+  end
+  T.eq(missing, {}, "every thread trigger is refused as an operator key")
+  T.finish("Cancel")
+end
+
+function C.keys_warning(V)
+  local core = require("vimnotate.core")
+  T.eq(core.keys, { comment = "c", delete = "d", good = "p" }, "a clash falls back to the defaults")
+  local wb = vim.wo[V.thread_win()].winbar
+  T.ok(wb:find('⚠ keys.looks_good "x" clashes with x; using the default keys', 1, true) ~= nil, "the winbar shows the warning: " .. wb)
+  T.cursor(14)
+  T.keys("pp")
+  T.eq(T.items()[1], { kind = "good", body = "", sent = false, lw = true, at = { 14, 14 } }, "the default key works")
+  T.finish("Cancel")
+end
+
+function C.keys_empty(V)
+  local core = require("vimnotate.core")
+  T.eq(core.keys, { comment = "c", delete = "d", good = "p" }, "an empty key falls back to the defaults")
+  T.ok(core.keys_warning ~= nil and core.keys_warning:find('keys.comment "" is not one printable ASCII character', 1, true) ~= nil, "and warns: " .. tostring(core.keys_warning))
+  T.finish("Cancel")
+end
+
+function C.keys_w(V, A)
+  T.cursor(2)
+  T.keys("wwline<CR>")
+  T.eq(shape(A, newest(A)), { "comment", "line", { 2, 2 } }, "ww comments the line when w is the comment key")
+  T.finish("Cancel")
+end
+
+function C.keys_custom(V, A)
+  local cases = {
+    { 0, "mmone<CR>", { "comment", "one", { 0, 0 } } },
+    { 1, "2Mtwo<CR>", { "comment", "two", { 1, 2 } } },
+    { 3, "mwword<CR>", { "comment", "word", { 3, 0, 3, 5 } } },
+    { 8, "ss", { "delete", "", { 8, 8 } } },
+    { 9, "2ss", { "delete", "", { 9, 10 } } },
+    { 11, "s2j", { "delete", "", { 11, 13 } } },
+    { 14, "yy", { "good", "", { 14, 14 } } },
+    { 15, "y3y", { "good", "", { 15, 17 } } },
+    { 18, "ye", { "good", "", { 18, 0, 18, 4 } } },
+    { 19, "Vjy", { "good", "", { 19, 20 } } },
+    { 21, "vem<CR>", nil },
+    { 21, "vemvis<CR>", { "comment", "vis", { 21, 0, 21, 4 } } },
+    { 22, "VMup<CR>", { "comment", "up", { 22, 22 } } },
+    { 23, "vjs", { "delete", "", { 23, 0, 24, 1 } } },
+  }
+  for _, c in ipairs(cases) do
+    T.cursor(c[1])
+    local n = vim.tbl_count(A.items)
+    T.keys(c[2])
+    if c[3] then
+      T.eq(shape(A, newest(A)), c[3], c[2] .. " on row " .. c[1])
+    else
+      T.eq(vim.tbl_count(A.items), n, c[2] .. " with an empty comment adds nothing")
+    end
+  end
+  T.cursor(25)
+  T.keys("y2y")
+  T.cursor(28)
+  T.keys(".")
+  T.eq(shape(A, newest(A)), { "good", "", { 28, 29 } }, "y2y . repeats two lines")
+  for _, lhs in ipairs({ "c", "d", "p", "C" }) do
+    T.eq(vim.fn.maparg(lhs, "n", false, true).buffer, nil, lhs .. " is not mapped in the thread")
+  end
+  local wb = vim.wo[V.thread_win()].winbar
+  T.ok(wb:find("m s y {motion} comment/delete/good", 1, true) ~= nil, "the winbar names the configured keys: " .. wb)
+  T.ok(not wb:find("⚠", 1, true), "no warning")
+  local tr = V.TRIGGERS
+  T.eq({ vim.list_slice(tr.n, 1, 4), tr.x, tr.o }, { { "m", "s", "y", "M" }, { "m", "s", "y", "M", "<LeftMouse>" }, { "m", "s", "y" } }, "triggers follow the keys")
+  T.cursor(30)
+  vim.api.nvim_input("V")
+  vim.defer_fn(function()
+    T.eq(vim.api.nvim_buf_get_lines(V.bars.action.buf, 0, -1, false)[1], " 👍 looks good (y)  💬 comment (m)  ❌ delete (s) ", "action bar names the configured keys")
+    vim.api.nvim_input("<Esc>")
+    vim.defer_fn(function()
+      T.finish("Cancel")
+    end, 30)
+  end, 50)
+end
+
+function C.keys_prefix(V, A)
+  local core = require("vimnotate.core")
+  T.eq(core.keys, { comment = "i", delete = "d", good = "a" }, "a and i accepted")
+  local cases = {
+    { 0, "ae", { "good", "", { 0, 0, 0, 4 } } },
+    { 1, "aaa", { "good", "", { 1, 1 } } },
+    { 2, "2aaa", { "good", "", { 2, 3 } } },
+    { 4, "a_", { "good", "", { 4, 4 } } },
+    { 9, "aap", { "good", "", { 8, 30 } } },
+    { 9, "dap", { "delete", "", { 8, 30 } } },
+    { 9, "iapx<CR>", { "comment", "x", { 8, 30 } } },
+    { 3, "dip", { "delete", "", { 0, 6 } } },
+    { 3, "iiiline<CR>", { "comment", "line", { 3, 3 } } },
+    { 5, "Ibig<CR>", { "comment", "big", { 5, 5 } } },
+    { 12, "daw", { "delete", "", { 12, 0, 12, 5 } } },
+    { 13, "aaf", { "good", "", { 13, 0, 13, 4 } } },
+    { 14, "daf", { "delete", "", { 14, 0, 14, 4 } } },
+    { 2, "vapd", { "delete", "", { 0, 7 } } },
+    { 16, "vafd", { "delete", "", { 16, 0, 16, 4 } } },
+  }
+  for _, c in ipairs(cases) do
+    T.cursor(c[1])
+    T.keys(c[2])
+    T.eq(shape(A, newest(A)), c[3], c[2] .. " on row " .. c[1])
+  end
+  T.eq(vim.fn.maparg("aa", "o", false, true).buffer, nil, "the aa line map is gone once the operator ends")
+  T.cursor(20)
+  T.keys("aaa")
+  T.cursor(22)
+  T.keys(".")
+  T.eq(shape(A, newest(A)), { "good", "", { 22, 22 } }, "aaa . repeats the line")
+  T.cursor(24)
+  T.keys("iiirep<CR>")
+  T.cursor(26)
+  T.keys(".<CR>")
+  T.eq(shape(A, newest(A)), { "comment", "rep", { 26, 26 } }, "iii . repeats with the last body")
+  T.cursor(27)
+  T.keys("a<Esc>")
+  T.eq(vim.fn.maparg("aa", "o", false, true).buffer, nil, "Esc drops the aa line map")
+  for _, m in ipairs({ "x", "o" }) do
+    T.eq(vim.fn.maparg("af", m, false, true).buffer, 0, "global " .. m .. "-mode af survives unshadowing")
+    T.eq(vim.fn.maparg("a", m, false, true).buffer, nil, "a is not mapped in " .. m .. " mode")
+    T.eq(vim.fn.maparg("i", m, false, true).buffer, nil, "i is not mapped in " .. m .. " mode")
+  end
+  T.eq(vim.fn.maparg("ab", "n"), "", "a global normal-mode ab is unshadowed")
+  T.eq({ V.TRIGGERS.x, V.TRIGGERS.o }, { { "d", "<LeftMouse>" }, { "d" } }, "no x or o triggers for text-object prefixes")
+  T.cursor(29)
+  vim.api.nvim_input("V")
+  vim.defer_fn(function()
+    local bar = V.bars.action
+    T.eq(vim.api.nvim_buf_get_lines(bar.buf, 0, -1, false)[1], " 👍 looks good  💬 comment  ❌ delete (d) ", "no key shown for keys unmapped in visual mode")
+    local pos = vim.api.nvim_win_get_position(bar.win)
+    local x = pos[2] + bar.spans[1].from + 2
+    T.mouse({ { "press", pos[1], x }, { "release", pos[1], x } }, function()
+      T.eq(shape(A, newest(A)), { "good", "", { 29, 29 } }, "looks good from the action bar")
+      T.finish("Cancel")
+    end)
+  end, 50)
+end
+
 return C

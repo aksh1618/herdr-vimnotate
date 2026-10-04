@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-unset HERDR_PLUGIN_CONFIG_DIR HERDR_PLUGIN_STATE_DIR VIMNOTATE_VIEW VIMNOTATE_ACTION_BAR VIMNOTATE_RESTORE
+unset HERDR_PLUGIN_CONFIG_DIR HERDR_PLUGIN_STATE_DIR VIMNOTATE_VIEW VIMNOTATE_ACTION_BAR VIMNOTATE_RESTORE VIMNOTATE_KEY_COMMENT VIMNOTATE_KEY_DELETE VIMNOTATE_KEY_LOOKS_GOOD
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 plugin="$(dirname "$here")"
 fx="$here/fixtures"
@@ -103,12 +103,18 @@ check '[ -s "$work/reply.md" ] && [ -z "$(ls -A "$work/undo")" ]' "no undo file 
 PRE="set rtp+=$fx/provider | lua local r = require('nvim-treesitter-textobjects.repeatable_move') vim.keymap.set('n', ';', r.repeat_last_move_next) vim.keymap.set('n', ',', r.repeat_last_move_previous) vim.keymap.set('n', 'f', r.builtin_f_expr, { expr = true })" vn ops.txt "" repeat_provider
 vn ops.txt "" config_defaults
 VIMNOTATE_VIEW=rail VIMNOTATE_ACTION_BAR=never vn ops.txt "" config_set
+vn ops.txt "" keys_resolve
+VIMNOTATE_KEY_LOOKS_GOOD=x vn ops.txt "" keys_warning
+VIMNOTATE_KEY_COMMENT= VIMNOTATE_KEY_LOOKS_GOOD=y vn ops.txt "" keys_empty
+VIMNOTATE_KEY_COMMENT=w vn ops.txt "" keys_w
+VIMNOTATE_KEY_COMMENT=m VIMNOTATE_KEY_DELETE=s VIMNOTATE_KEY_LOOKS_GOOD=y vn ops.txt "" keys_custom
+PRE="lua vim.keymap.set({'x', 'o'}, 'af', 'iw') vim.keymap.set('n', 'ab', '<Nop>')" VIMNOTATE_KEY_COMMENT=i VIMNOTATE_KEY_LOOKS_GOOD=a vn ops.txt "" keys_prefix
 
 cf="$work/cf"
 mkdir -p "$cf"
 cfg() { awk -v key="$1" -f "$plugin/config.awk" "$2"; }
-cfgall() { for k in view action_bar restore lines force_send; do printf '%s ' "$(cfg "$k" "$1")"; done; }
-defaults="inline always true 1000 false "
+cfgall() { for k in view action_bar restore lines force_send keys.comment keys.delete keys.looks_good; do printf '%s ' "$(cfg "$k" "$1")"; done; }
+defaults="inline always true 1000 false c d p "
 cat >"$cf/good.toml" <<'EOF'
 # vimnotate
 
@@ -118,10 +124,15 @@ action_bar="mouse"
 lines = 250 # fewer
 force_send = true
 unknown = "x"
+
+[keys]  # operators
+comment = "m"  # mine
+delete="#"
+looks_good = "a"
 EOF
-check '[ "$(cfgall "$cf/good.toml")" = "rail mouse false 250 true " ]' "config: every key, comments, blank lines, unknown key"
+check '[ "$(cfgall "$cf/good.toml")" = "rail mouse false 250 true m # a " ]' "config: every key, comments, blank lines, unknown key"
 printf 'view = "auto"\r\nlines = 42\r\n' >"$cf/crlf.toml"
-check '[ "$(cfgall "$cf/crlf.toml")" = "auto always true 42 false " ]' "config: CRLF line endings"
+check '[ "$(cfgall "$cf/crlf.toml")" = "auto always true 42 false c d p " ]' "config: CRLF line endings"
 cat >"$cf/bad.toml" <<'EOF'
 view = "sideways"
 action_bar = never
@@ -136,6 +147,21 @@ lines = "500"
 lines = 1001
 lines = 4294967296
 lines = 01
+keys.comment = m
+keys.delete = 'x'
+keys.looks_good = "\a"
+keys = { comment = "z" }
+comment = "z"
+[keys]
+comment = z
+good = "z"
+view = "rail"
+[keys.extra]
+comment = "z"
+[[keys]]
+delete = "z"
+[keys.]
+looks_good = "z"
 = "rail"
 EOF
 check '[ "$(cfgall "$cf/bad.toml")" = "$defaults" ]' "config: invalid values fall back to defaults"
@@ -143,6 +169,18 @@ printf 'lines = 1\n' >"$cf/min.toml"
 printf 'lines = 1000\n' >"$cf/max.toml"
 printf 'lines = 1\nlines = 1001\n' >"$cf/over.toml"
 check '[ "$(cfg lines "$cf/min.toml") $(cfg lines "$cf/max.toml") $(cfg lines "$cf/over.toml")" = "1 1000 1" ]' "config: lines accepts 1 to 1000 only"
+printf '[keys]\nlooks_good = "aa"\ndelete = "x"\n' >"$cf/keys.toml"
+check '[ "$(cfg keys.looks_good "$cf/keys.toml") $(cfg keys.delete "$cf/keys.toml")" = "aa x" ]' "config: a quoted key passes through for nvim to check"
+printf 'keys.comment = "m"\nkeys . delete = "s"\nkeys\t.\tlooks_good = "y"\n' >"$cf/dotted.toml"
+check '[ "$(cfg keys.comment "$cf/dotted.toml") $(cfg keys.delete "$cf/dotted.toml") $(cfg keys.looks_good "$cf/dotted.toml")" = "m s y" ]' "config: dotted keys outside a table, spaces around the dot"
+printf '[ keys . sub ]\ncomment = "m"\n' >"$cf/spacedsub.toml"
+check '[ "$(cfg keys.comment "$cf/spacedsub.toml")" = c ]' "config: a spaced subtable header is still a subtable"
+printf ' [ keys ] # ops\ncomment = "m"\n[other]\ndelete = "s"\n[keys]\ndelete = "y"\n[keys.sub]\nlooks_good = "z"\n' >"$cf/reopen.toml"
+check '[ "$(cfg keys.comment "$cf/reopen.toml") $(cfg keys.delete "$cf/reopen.toml") $(cfg keys.looks_good "$cf/reopen.toml")" = "m y p" ]' "config: spaced header, a reopened [keys], other tables and subtables ignored"
+printf 'view = "off"\n[keys]\ncomment = "m"\nview = "rail"\n' >"$cf/scoped.toml"
+check '[ "$(cfg view "$cf/scoped.toml") $(cfg keys.comment "$cf/scoped.toml")" = "off m" ]' "config: a top-level key under [keys] is ignored"
+printf 'keys = { comment = "m" }\n' >"$cf/inline.toml"
+check '[ "$(cfg keys.comment "$cf/inline.toml")" = c ]' "config: an inline table is not understood"
 printf 'view = "off"\n[other]\nview = "rail"\n' >"$cf/table.toml"
 check '[ "$(cfg view "$cf/table.toml")" = off ]' "config: keys under a table are ignored"
 check '[ "$(cfgall /dev/null)" = "$defaults" ]' "config: no file means defaults"
@@ -209,7 +247,7 @@ done
 ln -s "$hk/bin/herdr" "$pp/bin/herdr"
 cat >"$pp/bin/nvim" <<'EOF'
 #!/usr/bin/env bash
-env | grep -E '^VIMNOTATE_(VIEW|ACTION_BAR|RESTORE|STATE)=' | sort >"$HK_LOG.env"
+env | grep -E '^VIMNOTATE_(VIEW|ACTION_BAR|RESTORE|STATE|KEY_[A-Z_]+)=' | sort >"$HK_LOG.env"
 printf 'line one\nline two\n' >"$VIMNOTATE_REPLY"
 [ -z "${HK_EDIT:-}" ] || printf 'force_send = false\n' >"$HK_EDIT"
 EOF
@@ -219,6 +257,9 @@ view = "rail"
 action_bar = "never"
 restore = false
 force_send = true
+
+[keys]
+looks_good = "a"
 EOF
 pane_run() {
   : >"$HK_LOG"
@@ -230,7 +271,7 @@ pane_run() {
 }
 HERDR_PLUGIN_CONFIG_DIR="$pp/conf" HERDR_PLUGIN_STATE_DIR="$pp/state" XDG_STATE_HOME="$pp/xdg" pane_run
 got="$(tr '\n' ' ' <"$HK_LOG.env")"
-check '[ "$got" = "VIMNOTATE_ACTION_BAR=never VIMNOTATE_RESTORE=false VIMNOTATE_STATE=$pp/state/$srv-p1.json VIMNOTATE_VIEW=rail " ]' "herdr-vimnotate.sh passes config.toml and HERDR_PLUGIN_STATE_DIR to nvim (got: $got)"
+check '[ "$got" = "VIMNOTATE_ACTION_BAR=never VIMNOTATE_KEY_COMMENT=c VIMNOTATE_KEY_DELETE=d VIMNOTATE_KEY_LOOKS_GOOD=a VIMNOTATE_RESTORE=false VIMNOTATE_STATE=$pp/state/$srv-p1.json VIMNOTATE_VIEW=rail " ]' "herdr-vimnotate.sh passes config.toml and HERDR_PLUGIN_STATE_DIR to nvim (got: $got)"
 check 'grep -q "^Annotation send failed" "$HK_LOG"' "force_send sends a multi-line review to a pane with no agent"
 mkdir -p "$pp/edit"
 cp "$pp/conf/config.toml" "$pp/edit/config.toml"
@@ -238,7 +279,7 @@ HK_EDIT="$pp/edit/config.toml" HERDR_PLUGIN_CONFIG_DIR="$pp/edit" XDG_STATE_HOME
 check 'grep -q "^Annotation send failed" "$HK_LOG"' "config.toml edited during a review doesn't change it"
 HERDR_PLUGIN_CONFIG_DIR="$pp/noconf" XDG_STATE_HOME="$pp/xdg" pane_run
 got="$(tr '\n' ' ' <"$HK_LOG.env")"
-check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_RESTORE=true VIMNOTATE_STATE=$pp/xdg/vimnotate/$srv-p1.json VIMNOTATE_VIEW=inline " ]' "herdr-vimnotate.sh defaults with no config.toml, state under XDG_STATE_HOME (got: $got)"
+check '[ "$got" = "VIMNOTATE_ACTION_BAR=always VIMNOTATE_KEY_COMMENT=c VIMNOTATE_KEY_DELETE=d VIMNOTATE_KEY_LOOKS_GOOD=p VIMNOTATE_RESTORE=true VIMNOTATE_STATE=$pp/xdg/vimnotate/$srv-p1.json VIMNOTATE_VIEW=inline " ]' "herdr-vimnotate.sh defaults with no config.toml, state under XDG_STATE_HOME (got: $got)"
 check 'grep -q "^Annotations not sent" "$HK_LOG"' "a multi-line review to a pane with no agent is not sent by default"
 
 empty() { awk -f "$plugin/composer-empty.awk"; }

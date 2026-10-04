@@ -2,6 +2,7 @@ function valid(k, v, quoted) {
   if (k == "view") return quoted && v ~ /^(inline|rail|auto|off)$/
   if (k == "action_bar") return quoted && v ~ /^(always|mouse|never)$/
   if (k == "restore" || k == "force_send") return !quoted && v ~ /^(true|false)$/
+  if (k ~ /^keys\.(comment|delete|looks_good)$/) return quoted
   if (k == "lines") return !quoted && (v ~ /^[1-9][0-9]?[0-9]?$/ || v == "1000")
   return 0
 }
@@ -11,15 +12,31 @@ BEGIN {
   d["restore"] = "true"
   d["lines"] = "1000"
   d["force_send"] = "false"
+  d["keys.comment"] = "c"
+  d["keys.delete"] = "d"
+  d["keys.looks_good"] = "p"
+  table = ""
 }
-/^[ \t]*\[/ { table = 1 }
-table { next }
+/^[ \t]*\[/ {
+  if (match($0, /^[ \t]*\[[ \t]*[A-Za-z0-9_-]+([ \t]*\.[ \t]*[A-Za-z0-9_-]+)*[ \t]*\][ \t\r]*(#.*)?$/)) {
+    table = $0
+    sub(/^[ \t]*\[/, "", table)
+    sub(/\].*$/, "", table)
+    gsub(/[ \t]/, "", table)
+    table = table "."
+  } else {
+    table = "\001"
+  }
+  next
+}
 {
   line = $0
   sub(/^[ \t]+/, "", line)
-  if (!match(line, /^[A-Za-z0-9_-]+[ \t]*=[ \t]*/)) next
+  if (!match(line, /^[A-Za-z0-9_-]+([ \t]*\.[ \t]*[A-Za-z0-9_-]+)*[ \t]*=[ \t]*/)) next
   k = line
   sub(/[ \t]*=.*/, "", k)
+  gsub(/[ \t]/, "", k)
+  k = table k
   v = substr(line, RLENGTH + 1)
   quoted = v ~ /^"/
   if (quoted) {

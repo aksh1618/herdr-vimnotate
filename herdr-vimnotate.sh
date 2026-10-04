@@ -14,6 +14,9 @@ view="$(conf view)"
 action_bar="$(conf action_bar)"
 restore_on="$(conf restore)"
 force_send="$(conf force_send)"
+key_comment="$(conf keys.comment)"
+key_delete="$(conf keys.delete)"
+key_looks_good="$(conf keys.looks_good)"
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
 server="$(printf '%s' "${HERDR_SOCKET_PATH:-}" | sha256 | cut -c1-12)"
 state="${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/vimnotate}/$server-$(printf '%s' "$pane" | tr -c 'A-Za-z0-9_-' '_').json"
@@ -50,7 +53,8 @@ done
 printf '\033[2J\033[H'
 cat "$dir/visible.ansi"
 VIMNOTATE_RAW="$dir/thread.ansi" VIMNOTATE_SELECTED="$dir/selected.txt" VIMNOTATE_REPLY="$reply" VIMNOTATE_STATE="$state" VIMNOTATE_SERVER="$server" \
-  VIMNOTATE_VIEW="$view" VIMNOTATE_ACTION_BAR="$action_bar" VIMNOTATE_RESTORE="$restore_on" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
+  VIMNOTATE_VIEW="$view" VIMNOTATE_ACTION_BAR="$action_bar" VIMNOTATE_RESTORE="$restore_on" \
+  VIMNOTATE_KEY_COMMENT="$key_comment" VIMNOTATE_KEY_DELETE="$key_delete" VIMNOTATE_KEY_LOOKS_GOOD="$key_looks_good" nvim -i NONE -c "luafile $script_dir/vimnotate.lua"
 printf '\033[2J\033[H'
 restore
 [ -f "$reply" ] || exit 0

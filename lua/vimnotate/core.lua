@@ -102,6 +102,82 @@ C.KINDS = {
 
 C.view = { mode = "off", bubbles = {}, setting = vim.env.VIMNOTATE_VIEW }
 
+C.OP_KINDS = { "comment", "delete", "good" }
+C.DEFAULT_KEYS = { comment = "c", delete = "d", good = "p" }
+C.KEY_SETTINGS = { comment = "keys.comment", delete = "keys.delete", good = "keys.looks_good" }
+C.FIXED_KEYS = { "x", "e", "K", "u", "<C-r>", "<C-o>", "<C-i>", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" }
+C.BUFFER_SWITCHERS = { "]b", "[b", "]B", "[B", "]A", "[A", "<Space><Space>", "<C-^>", "<C-6>", "gf", "gF" }
+C.BUILTIN_KEYS = { ".", ":", "v", "V", "g", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+C.TEXTOBJ_PREFIXES = { a = true, i = true }
+
+local function taken_by(key)
+  for _, group in ipairs({ C.FIXED_KEYS, C.BUFFER_SWITCHERS, C.BUILTIN_KEYS }) do
+    for _, lhs in ipairs(group) do
+      if vim.keycode(lhs):sub(1, 1) == key then
+        return lhs
+      end
+    end
+  end
+end
+
+function C.resolve_keys(env)
+  local keys, problems = {}, {}
+  for _, kind in ipairs(C.OP_KINDS) do
+    local v = env[kind] or C.DEFAULT_KEYS[kind]
+    keys[kind] = v
+    local name = C.KEY_SETTINGS[kind] .. " " .. vim.inspect(v)
+    if not v:match("^[!-~]$") then
+      problems[#problems + 1] = name .. " is not one printable ASCII character"
+    elseif taken_by(v) then
+      problems[#problems + 1] = name .. " clashes with " .. taken_by(v)
+    end
+  end
+  for i, a in ipairs(C.OP_KINDS) do
+    for j = i + 1, #C.OP_KINDS do
+      local b = C.OP_KINDS[j]
+      if keys[a] == keys[b] then
+        problems[#problems + 1] = C.KEY_SETTINGS[a] .. " and " .. C.KEY_SETTINGS[b] .. " are both " .. vim.inspect(keys[a])
+      end
+    end
+  end
+  if #problems > 0 then
+    return vim.deepcopy(C.DEFAULT_KEYS), table.concat(problems, "; ") .. "; using the default keys"
+  end
+  return keys, nil
+end
+
+C.keys, C.keys_warning = C.resolve_keys({
+  comment = os.getenv("VIMNOTATE_KEY_COMMENT"),
+  delete = os.getenv("VIMNOTATE_KEY_DELETE"),
+  good = os.getenv("VIMNOTATE_KEY_LOOKS_GOOD"),
+})
+
+function C.textobj_prefix(key)
+  return C.TEXTOBJ_PREFIXES[key] == true
+end
+
+function C.line_lhs(kind)
+  local key = C.keys[kind]
+  return C.textobj_prefix(key) and key .. key or key
+end
+
+function C.upper_comment_key()
+  local key = C.keys.comment
+  local up = key:upper()
+  if up == key then
+    return nil
+  end
+  for _, kind in ipairs(C.OP_KINDS) do
+    if C.keys[kind] == up then
+      return nil
+    end
+  end
+  if taken_by(up) then
+    return nil
+  end
+  return up
+end
+
 function C.line_len(row)
   return #(vim.api.nvim_buf_get_lines(thread, row, row + 1, false)[1] or "")
 end

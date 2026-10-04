@@ -84,6 +84,10 @@ local function apply_op(kind, type)
   fresh = false
   if recording then
     local motion = table.concat(recording.keys)
+    local lhs = recording.line
+    if lhs and motion:sub(-#lhs) == lhs then
+      motion = motion:sub(1, -#lhs - 1) .. "_"
+    end
     local recorded = not recording.visual and motion ~= ""
     local keys = recorded and ((recording.count > 0 and recording.count or "") .. "g@" .. motion) or shape_keys(r)
     M.last_op = { kind = kind, func = OPFUNCS[kind], keys = keys, bang = not recorded }
@@ -138,11 +142,39 @@ for kind, name in pairs(OPFUNCS) do
   end
 end
 
+local pending_line = nil
+
+local function drop_pending_line()
+  if pending_line then
+    pcall(vim.keymap.del, "o", pending_line, { buffer = thread })
+    pending_line = nil
+  end
+end
+
+local function line_motion(kind, key)
+  return function()
+    if vim.v.operator == "g@" and vim.o.operatorfunc:find(OPFUNCS[kind], 1, true) then
+      if recording then
+        recording.line = key
+      end
+      return "_"
+    end
+    return key
+  end
+end
+
 local function operator(kind, suffix)
   return function()
     fresh = true
-    local rec = { keys = {}, count = vim.v.count, visual = vim.fn.mode():find("^[vV\22]") ~= nil, first = true }
+    local visual = vim.fn.mode():find("^[vV\22]") ~= nil
+    local rec = { keys = {}, count = vim.v.count, visual = visual, first = true }
     recording = rec
+    drop_pending_line()
+    local key = core.keys[kind]
+    if not visual and not suffix and core.textobj_prefix(key) then
+      pending_line = core.line_lhs(kind)
+      vim.keymap.set("o", pending_line, line_motion(kind, pending_line), { buffer = thread, nowait = true, expr = true })
+    end
     vim.on_key(function(_, typed)
       if recording ~= rec then
         return
@@ -155,15 +187,6 @@ local function operator(kind, suffix)
     end, recorder)
     vim.o.operatorfunc = "v:lua.require'vimnotate'." .. OPFUNCS[kind]
     return "g@" .. (suffix or "")
-  end
-end
-
-local function line_motion(kind, key)
-  return function()
-    if vim.v.operator == "g@" and vim.o.operatorfunc:find(OPFUNCS[kind], 1, true) then
-      return "_"
-    end
-    return key
   end
 end
 
@@ -248,6 +271,16 @@ function M.jumplist(dir, count)
   vim.api.nvim_win_call(tw, function()
     pcall(vim.cmd, "normal! " .. (count or 1) .. (dir < 0 and "\15" or "\t"))
   end)
+end
+
+function Op.setup()
+  vim.api.nvim_create_autocmd("ModeChanged", {
+    callback = function()
+      if pending_line and not (vim.v.event.new_mode or ""):find("^no") then
+        drop_pending_line()
+      end
+    end,
+  })
 end
 
 Op.operator = operator

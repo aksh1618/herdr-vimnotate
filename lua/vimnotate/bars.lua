@@ -11,9 +11,9 @@ local line_len = core.line_len
 local B = { swallow = false, pending_click = nil }
 
 local BAR_ACTIONS = {
-  { kind = "good", label = "looks good", key = "p" },
-  { kind = "comment", label = "comment", key = "c" },
-  { kind = "delete", label = "delete", key = "d" },
+  { kind = "good", label = "looks good" },
+  { kind = "comment", label = "comment" },
+  { kind = "delete", label = "delete" },
 }
 local HINT_DELAY = 120
 local bar_ns = vim.api.nvim_create_namespace("vimnotate.bar")
@@ -154,7 +154,8 @@ end
 function bars.pieces(entries, hl)
   local pieces = {}
   for _, e in ipairs(entries) do
-    pieces[#pieces + 1] = { text = " " .. e.glyph .. " " .. e.label .. " (" .. e.key .. ") ", hl = hl or e.hl, run = e.run }
+    local key = e.key and (" (" .. e.key .. ")") or ""
+    pieces[#pieces + 1] = { text = " " .. e.glyph .. " " .. e.label .. key .. " ", hl = hl or e.hl, run = e.run }
   end
   return pieces
 end
@@ -165,10 +166,10 @@ local function action_pieces()
     return {
       glyph = kind.glyph,
       label = a.label,
-      key = a.key,
+      key = not core.textobj_prefix(core.keys[a.kind]) and core.keys[a.kind] or nil,
       hl = "VimnotateBar" .. kind.hl:sub(10),
       run = function()
-        vim.api.nvim_feedkeys(a.key, "m", false)
+        vim.api.nvim_feedkeys(vim.keycode("<Plug>(vimnotate-" .. a.kind .. ")"), "m", false)
       end,
     }
   end, BAR_ACTIONS))

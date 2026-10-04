@@ -2,12 +2,12 @@
 
 [![vimnotate reviewing a Claude Code reply: p marks paragraphs as looking good, d deletes one, c comments on another, q sends the review to the agent's composer](docs/vimnotate-demo.webp)](https://github.com/user-attachments/assets/83c63ee7-5f94-4757-9a08-98532e6a04fd)
 
-Press `prefix+a` to switch to annotation mode for the focused Herdr pane, using neovim under the hood. You can review and annotate an agent's reply with vim motions for three operations:
+Press `prefix+a` to switch to annotation mode for the focused Herdr pane, using neovim under the hood. You can review and annotate an agent's reply with vim motions for three operations (the keys are [configurable](#configuration)):
 1. `c` is comment
 2. `d` is delete (remove this)
 3. `p` is plus (looks good)
 
-So, for example, `cap` comments on a paragraph, `dap` marks one for deletion, `pp` says a line looks good, `.` repeats the last one.
+So, with the default keys, `cap` comments on a paragraph, `dap` marks one for deletion, `pp` says a line looks good, `.` repeats the last one.
 
 Once you're done, press `q` to send the whole review back as one message, sitting unsubmitted in the agent's composer.
 
@@ -45,7 +45,7 @@ The manifest lists macOS and the scripts avoid GNU-only tools, but it has only b
 ## Flow
 
 1. `prefix+a`. The thread opens in place, scrolled to the bottom, in a read-only buffer.
-2. Navigate like neovim; Annotate with the c/d/p operators (more operators below). Or just use your mouse.
+2. Navigate like neovim; Annotate with the c/d/p operators (the default keys; more operators below). Or just use your mouse.
 3. Each annotation is a coloured highlight over its range plus a box under it with your comment (or, with `R`, a bubble in a side rail).
 4. `q` (or `:qa`, or `:Send`) once you're done.
 5. The target pane comes back and the review is pasted into its composer **unsubmitted**, so you read it back and press Enter yourself.
@@ -55,11 +55,11 @@ Already selected something in herdr's copy mode? Press `prefix+a` with the selec
 
 ## Keymap
 
-In the thread:
+In the thread, with the default operator keys (see [Configuration](#configuration) to change `c`, `d` and `p`):
 
 | Key | What it does |
 | --- | --- |
-| `c{motion}`, `cc`, `C`, visual `c` | Comment. Opens a compose popup below the range. |
+| `c{motion}`, `cc`, `C`, visual `c` | Comment. Opens a compose popup below the range. `C` is the comment key in upper case, when that key is free. |
 | `d{motion}`, `dd`, visual `d` | Mark for deletion ("Remove this."), with an optional reason. |
 | `p{motion}`, `pp`, visual `p` | Mark as looking good ("Looks good."). |
 | `.` | Repeat the last operator on a new range. Counts work too (`3cc`). |
@@ -80,7 +80,7 @@ In the thread:
 - The comment compose popup is an ordinary vim buffer: `Enter` saves (in insert or normal mode), `Ctrl-j` inserts a new line, `Esc` goes to normal mode and `q` there cancels.
 - The note popup is a plain buffer too, but `Enter` is just a newline. `q` or `Tab` in normal mode hides it, and so does clicking back into the thread. Hiding never discards the note; only `:Cancel` does.
 - In the side rail: `j`/`k` move between annotations, `Enter` jumps to one in the thread, `e` edits, `x` removes, `Esc` or `Tab` goes back to the thread.
-- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels. Resting the cursor on an annotation shows a hint bar for `e`, `x` and `K`.
+- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels, each with its key. Resting the cursor on an annotation shows a hint bar for `e`, `x` and `K`.
 
 ## What gets sent
 
@@ -133,11 +133,22 @@ lines = 1000
 
 # true sends a multi-line review to a pane with no agent anyway (see docs/how-it-works.md#sending).
 force_send = false
+
+# The operator keys. Each is one key: {key}{motion} on a motion or text object, doubled for the current line, the key itself in visual mode.
+[keys]
+comment = "c"     # its uppercase (C) also comments to the line, when that key is free
+delete = "d"
+looks_good = "p"
 ```
 
 - It's read each time vimnotate opens, so changes apply to the next review without restarting herdr. A review that's already open keeps the settings it started with.
-- Only flat `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments.
+- Only `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments. The operator keys go under a `[keys]` header (or as `keys.comment = "c"` and so on above any header); other tables and inline tables (`keys = { comment = "c" }`) are ignored.
 - Unknown keys/values are ignored.
+- An operator key is one printable ASCII character other than a space, in double quotes. If one isn't, if two are the same, or if one is already a thread key (`x`, `e`, `K`, `u`, `q`, `R`, `H`, `L`, `g`, `v`, `V`, `.`, `:`, a digit, or `]`/`[`), all three fall back to `c`, `d` and `p`, and the thread's top bar says why.
+- `a` and `i` work as operator keys, but they also start text objects (`ap`, `iw`, and any your config adds, such as `af`), so they stay text objects after another operator and in visual mode:
+  - Taking `a` as the example, `a{motion}` works as usual, and the line form is `aaa` (`a` then `aa`, as `ap` is `a` then `ap`) or `a_`. Counts work: `3aaa`.
+  - `a` isn't mapped in visual mode, so use the action bar there: its label for that operator shows no key.
+  - Your own `a`/`i` text objects are never deleted as [ambiguous maps](#does-it-edit-my-neovim-config).
 
 ### Colours
 

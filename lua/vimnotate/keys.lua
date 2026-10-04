@@ -30,18 +30,26 @@ end
 function K.setup()
   local bo = { buffer = thread, nowait = true }
   local ebo = { buffer = thread, nowait = true, expr = true }
-  vim.keymap.set("n", "c", operator("comment"), ebo)
-  vim.keymap.set("n", "d", operator("delete"), ebo)
-  vim.keymap.set("n", "p", operator("good"), ebo)
-  vim.keymap.set("n", "cw", operator("comment", "w"), ebo)
-  vim.keymap.set("n", "C", operator("comment", "_"), ebo)
-  vim.keymap.set("x", "c", operator("comment"), ebo)
-  vim.keymap.set("x", "C", operator("comment"), ebo)
-  vim.keymap.set("x", "d", operator("delete"), ebo)
-  vim.keymap.set("x", "p", operator("good"), ebo)
-  vim.keymap.set("o", "c", line_motion("comment", "c"), ebo)
-  vim.keymap.set("o", "d", line_motion("delete", "d"), ebo)
-  vim.keymap.set("o", "p", line_motion("good", "p"), ebo)
+  local keys = core.keys
+  for _, kind in ipairs(core.OP_KINDS) do
+    local key = keys[kind]
+    vim.keymap.set("n", key, operator(kind), ebo)
+    vim.keymap.set("x", "<Plug>(vimnotate-" .. kind .. ")", operator(kind), ebo)
+    if not core.textobj_prefix(key) then
+      vim.keymap.set("x", key, operator(kind), ebo)
+      vim.keymap.set("o", key, line_motion(kind, key), ebo)
+    end
+  end
+  if keys.comment ~= "w" then
+    vim.keymap.set("n", keys.comment .. "w", operator("comment", "w"), ebo)
+  end
+  local upper = core.upper_comment_key()
+  if upper then
+    vim.keymap.set("n", upper, operator("comment", "_"), ebo)
+    if not core.textobj_prefix(keys.comment) then
+      vim.keymap.set("x", upper, operator("comment"), ebo)
+    end
+  end
   vim.keymap.set("n", "]a", jump_key(1), bo)
   vim.keymap.set("n", "[a", jump_key(-1), bo)
   vim.keymap.set("n", "K", M.hover, bo)

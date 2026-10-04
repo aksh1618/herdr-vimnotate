@@ -31,7 +31,12 @@ local function refresh_loclist()
   vim.fn.setloclist(tw, {}, "r", { title = "vimnotate annotations", items = items })
 end
 
-local HINTS = "c d p {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x remove · R toggle view · Tab note · q send"
+local function winbar_escape(text)
+  return (text:gsub("%%", "%%%%"))
+end
+
+local HINTS = winbar_escape(core.keys.comment .. " " .. core.keys.delete .. " " .. core.keys.good)
+  .. " {motion} comment/delete/good · u undo · ]a [a · K show · e edit · x remove · R toggle view · Tab note · q send"
 
 local function thread_winbar()
   local counts, sent = {}, 0
@@ -57,6 +62,9 @@ local function thread_winbar()
   local head = "%#VimnotateMode# VIMNOTATE %*"
   if #tally > 0 then
     head = head .. " " .. table.concat(tally, " ")
+  end
+  if core.keys_warning then
+    head = head .. " · %#WarningMsg#⚠ " .. winbar_escape(core.keys_warning) .. "%*"
   end
   if view.flash then
     head = head .. " · " .. view.flash
@@ -110,13 +118,31 @@ local function unshadow(maps, mode, lhs)
   end
 end
 
-M.BUFFER_SWITCHERS = { "]b", "[b", "]B", "[B", "]A", "[A", "<Space><Space>", "<C-^>", "<C-6>", "gf", "gF" }
+M.BUFFER_SWITCHERS = core.BUFFER_SWITCHERS
 
-local TRIGGERS = {
-  n = { "c", "C", "d", "p", "x", "e", "K", "u", "<C-r>", "<C-o>", "<C-i>", "]a", "[a", "q", "R", "H", "L", "<Tab>", "<S-Tab>", "<LeftMouse>" },
-  x = { "c", "C", "d", "p", "<LeftMouse>" },
-  o = { "c", "d", "p" },
-}
+local function build_triggers()
+  local t = { n = {}, x = {}, o = {} }
+  for _, kind in ipairs(core.OP_KINDS) do
+    local key = core.keys[kind]
+    t.n[#t.n + 1] = key
+    if not core.textobj_prefix(key) then
+      t.x[#t.x + 1] = key
+      t.o[#t.o + 1] = key
+    end
+  end
+  local upper = core.upper_comment_key()
+  if upper then
+    t.n[#t.n + 1] = upper
+    if not core.textobj_prefix(core.keys.comment) then
+      t.x[#t.x + 1] = upper
+    end
+  end
+  vim.list_extend(t.n, core.FIXED_KEYS)
+  t.x[#t.x + 1] = "<LeftMouse>"
+  return t
+end
+
+local TRIGGERS = build_triggers()
 M.TRIGGERS = TRIGGERS
 
 local function unshadow_triggers()

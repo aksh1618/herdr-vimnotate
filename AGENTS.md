@@ -11,7 +11,7 @@ Machine-specific notes, if present: @AGENTS.local.md
 - `vimnotate.lua`: the entry point loaded with `luafile`. Registers every file in `lua/vimnotate/` in `package.preload` by its absolute path, clearing any cached copy, then requires `vimnotate`. Preload runs before the `runtimepath` searcher and `vim.loader`, so a module of the same name elsewhere can't shadow these.
 - `lua/vimnotate/`: the nvim session, one module per area.
   - `init.lua`: the facade `M` (what `require("vimnotate")` returns), the setup order, restore, the selected-text anchor and the deferred startup passes.
-  - `core.lua`: env paths, global options, the thread buffer and its window, the note buffer/window state, `view` state, `KINDS` and small range helpers.
+  - `core.lua`: env paths, global options, the thread buffer and its window, the note buffer/window state, `view` state, `KINDS`, the operator keys (`keys`, checked against `FIXED_KEYS`, `BUFFER_SWITCHERS` and `BUILTIN_KEYS`) and small range helpers.
   - `ansi.lua`: SGR parsing into text lines and highlight spans.
   - `highlights.lua`: the `Vimnotate*` highlight groups.
   - `store.lua`: the annotation store `A`, undo/redo history `H`.
@@ -26,7 +26,7 @@ Machine-specific notes, if present: @AGENTS.local.md
   - `restore.lua`: matching saved annotations back into the thread, writing the restore state.
   - `send.lua`: the reply format and writing `reply.md` on exit.
   - `keys.lua`: the thread buffer's keymaps.
-- `config.awk`: the one reader of `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. `awk -v key=<name> -f config.awk <file>` prints that key's value, or its default when missing or invalid. Both scripts use it; nvim never reads the file.
+- `config.awk`: the one reader of `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. `awk -v key=<name> -f config.awk <file>` prints that key's value, or its default when missing or invalid. A key under a table header is named with its table (`keys.comment` for `comment` under `[keys]`); tables it doesn't know are skipped. Both scripts use it; nvim never reads the file.
 - `composer-empty.awk`: decides whether the agent's composer is empty, from the shapes Claude Code, pi and Codex draw. Anything it does not recognise counts as non-empty.
 - `tests/`: `run.sh` runs `cases.lua` through `lib.lua` in headless `nvim --clean`.
 
@@ -54,7 +54,8 @@ That loads the user's own nvim config, which is where most breakage shows up. Ne
 - **No cyclic top-level `require`s.** A module may require only modules `init.lua` loads before it. A call that would point the other way goes through the facade at call time (`M.compose(...)`, `M.apply_view()`), and every such function is assigned on `M`.
 - **Shared state has one owner.** Read and write it through the owning module's table (`core.note.buf`, `chrome.markdown_warm`, the bars module's `swallow` and `pending_click`); never copy a value that changes into another module's local.
 - **Change annotations only through the store** (`M.annotations`: `add`/`update`/`remove`). Undo, the location list, the winbar, the rail and the inline boxes all hang off `on_change`; editing extmarks directly bypasses all of them.
-- **Every new thread key goes into `M.TRIGGERS`.** `unshadow_triggers()` deletes global maps that extend a trigger (a surround plugin's `cs`, `ds`), because a buffer-local exact match does not escape the `timeoutlen` wait. It re-runs, coalesced, after every lazy.nvim `LazyLoad`. Maps are also `nowait`.
+- **Every new thread key goes into `core.FIXED_KEYS`**, which feeds `M.TRIGGERS` and the check that refuses it as an operator key. `unshadow_triggers()` deletes global maps that extend a trigger (a surround plugin's `cs`, `ds`), because a buffer-local exact match does not escape the `timeoutlen` wait. It re-runs, coalesced, after every lazy.nvim `LazyLoad`. Maps are also `nowait`.
+- **Operator keys come from `core.keys`, never literals.** A key in `core.TEXTOBJ_PREFIXES` (`a`, `i`) is mapped in normal mode only; its line form is a buffer-local o-mode `aa` that `operator()` adds and the next mode change out of operator-pending removes, so other operators keep `aa`/`af` text objects and x/o-mode maps starting with it are never unshadowed. The action bar runs operators through `<Plug>(vimnotate-<kind>)`, which works for every key.
 - **Keep `.` working.** Operators go through `operatorfunc`/`g@`. After a compose popup closes, `M.restore_repeat()` replays the operator so `.` points back at it instead of at the popup's insert.
 
 ## Invariants

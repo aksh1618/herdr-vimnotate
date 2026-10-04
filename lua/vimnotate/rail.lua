@@ -241,6 +241,7 @@ local function rail_scrub(win)
   for k, v in pairs(opts) do
     vim.wo[win][k] = v
   end
+  core.tint_winbar(win)
   vim.wo[win].winbar = rail_winbar()
 end
 

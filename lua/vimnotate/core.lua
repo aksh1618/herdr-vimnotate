@@ -38,6 +38,20 @@ end
 vim.bo[thread].modifiable = false
 C.thread = thread
 
+local function tint_winbar(win)
+  local keep = {}
+  for pair in vim.wo[win].winhighlight:gmatch("[^,]+") do
+    local from = pair:match("^([^:]+):")
+    if from ~= "WinBar" and from ~= "WinBarNC" then
+      keep[#keep + 1] = pair
+    end
+  end
+  keep[#keep + 1] = "WinBar:VimnotateWinbar"
+  keep[#keep + 1] = "WinBarNC:VimnotateWinbar"
+  vim.wo[win].winhighlight = table.concat(keep, ",")
+end
+C.tint_winbar = tint_winbar
+
 local function scrub_win(win)
   if win == -1 then
     return
@@ -52,6 +66,7 @@ local function scrub_win(win)
   vim.wo[win].statuscolumn = ""
   vim.wo[win].colorcolumn = ""
   vim.wo[win].fillchars = "eob: "
+  tint_winbar(win)
   vim.wo[win].winfixbuf = vim.v.vim_did_enter == 1
 end
 scrub_win(vim.api.nvim_get_current_win())

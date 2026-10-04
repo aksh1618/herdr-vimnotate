@@ -54,7 +54,10 @@ local function thread_winbar()
   if note_text() ~= "" then
     tally[#tally + 1] = "%@v:lua.vimnotate_note_click@%#VimnotateWinbarNote#✎ note%*%T"
   end
-  local head = #tally > 0 and ("THREAD " .. table.concat(tally, " ")) or "THREAD"
+  local head = "%#VimnotateMode# VIMNOTATE %*"
+  if #tally > 0 then
+    head = head .. " " .. table.concat(tally, " ")
+  end
   if view.flash then
     head = head .. " · " .. view.flash
   end

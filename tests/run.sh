@@ -87,6 +87,8 @@ vn ops.txt "" note_layout
 vn ops.txt "" note_focus
 vn ops.txt "" note_title_insert
 vn ops.txt "" note_marker
+vn ops.txt "" mode_cue
+PRE="hi VimnotateMode guibg=#123456" vn ops.txt "" mode_cue_override
 vn ops.txt "" pin_rail
 vn ops.txt "" pin_alone
 vn ops.txt "" pin_nav

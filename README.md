@@ -139,6 +139,27 @@ force_send = false
 - Only flat `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments.
 - Unknown keys/values are ignored.
 
+### Colours
+
+The thread looks like the pane it replaced, so vimnotate marks the switch the way a statusline marks a vim mode: the top row (the winbar) starts with an amber `VIMNOTATE` badge and has a warm, muted tint. The bottom row gets the same tint only when your config has one, that is with `cmdheight` above 0 (with `cmdheight=0` there is no bottom row, and nothing is added). These are highlight groups, picked for `background=dark` or `light` (and re-picked when it changes), with cterm fallbacks:
+
+| Group | What it colours | Dark | Light |
+| --- | --- | --- | --- |
+| `VimnotateMode` | The `VIMNOTATE` badge, bold. | `#1c1c1c` on `#ffc340` | the same |
+| `VimnotateWinbar` | The rest of the top row, over the thread and the side rail. | `#d6cbb0` on `#2b2620` | `#4a3c1e` on `#f2e6c9` |
+| `VimnotateMsgArea` | The bottom row (`MsgArea`), when `cmdheight` is above 0. | links to `VimnotateWinbar` | |
+
+The badge is an orange-leaning amber so it doesn't read as the comment yellow (`#d7d700`, also used by the `✎ note` marker, which turns olive `#5f5f00` on a light background), and the rest of the bar stays a muted warm grey rather than yellow so the note marker keeps its contrast. A keymap warning on the bar uses your colorscheme's `WarningMsg`, so its contrast depends on that. The cterm fallbacks are 214 for the badge, 251 on 235 (dark) and 237 on 223 (light) for the bar.
+
+vimnotate leaves a group alone once something else has set it, so set your own in your neovim config, or in a `ColorScheme` autocmd if a colorscheme loads after it:
+
+```lua
+vim.api.nvim_set_hl(0, "VimnotateMode", { fg = "#1a1b26", bg = "#7aa2f7", bold = true })
+vim.api.nvim_set_hl(0, "VimnotateMsgArea", { link = "Normal" })
+```
+
+Linking `VimnotateMsgArea` to `Normal` leaves the bottom row untinted. Use a link rather than `{}`: an empty group counts as unset, so vimnotate fills it in again.
+
 ## FAQ
 
 ### How does it work?
@@ -162,6 +183,7 @@ No. The plugin needs to override some neovim config to work well, but only insid
 - Global maps that would make its keys ambiguous are deleted for the length of the session. A global `cs` (surround plugins) or `]ab` makes `c` or `]a` wait out `timeoutlen` before deciding, and a buffer-local exact match does *not* escape that wait. They're re-checked after every lazy.nvim `LazyLoad`, since a lazy-loaded plugin can map them later.
 - Global left-mouse maps are deleted and `mouse=a` is forced, since the drag-select gesture needs the mouse.
 - `lualine` is hidden if present, and `laststatus=0` is kept.
+- The thread window's `winhighlight` maps `WinBar` to `VimnotateWinbar`, and `MsgArea` links to `VimnotateMsgArea` (see [Colours](#colours)).
 - The compose and note popups are `filetype=markdown`, which pulls in whatever markdown stack is loaded. It's pre-warmed on a throwaway buffer so it doesn't load inside the first keypress.
 - The empty-composer check is a heuristic that recognises the composer shapes of Claude Code, pi and Codex: a single line between the last two coloured horizontal rules with only coloured text below them (Claude Code, pi), or a `›` prompt at the start of a line through its shaded block (Codex). It's empty when that holds nothing but faint text and Claude Code's leading `❯` or Codex's `›`. Other agents, and anything it isn't sure of, get a leading blank line above the annotations (a space before a one-line review).
 

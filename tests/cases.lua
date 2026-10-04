@@ -568,6 +568,40 @@ function C.note_title_insert(V)
   T.finish("Cancel")
 end
 
+function C.mode_cue(V)
+  local tw = V.thread_win()
+  T.eq(vim.api.nvim_win_get_width(tw), vim.o.columns, "thread keeps the full width")
+  T.eq({ vim.wo[tw].signcolumn, vim.wo[tw].number, vim.wo[tw].wrap }, { "no", false, true }, "no gutter, wrap kept")
+  T.ok(vim.wo[tw].winbar:find("^%%#VimnotateMode# VIMNOTATE %%%*") ~= nil, "winbar opens with the badge: " .. vim.wo[tw].winbar)
+  T.eq(vim.wo[tw].winhighlight, "WinBar:VimnotateWinbar,WinBarNC:VimnotateWinbar", "winbar row is tinted")
+  local badge = vim.api.nvim_get_hl(0, { name = "VimnotateMode" })
+  local bar = vim.api.nvim_get_hl(0, { name = "VimnotateWinbar" })
+  T.ok(badge.bg and badge.ctermbg and badge.bold, "badge has gui and cterm colours")
+  T.ok(bar.bg and bar.ctermbg and bar.bg ~= badge.bg, "bar tint has gui and cterm colours")
+  T.eq(vim.api.nvim_get_hl(0, { name = "MsgArea" }).link, "VimnotateMsgArea", "bottom row follows VimnotateMsgArea")
+  local head = vim.api.nvim_eval_statusline(vim.wo[tw].winbar, { winid = tw, use_winbar = true, highlights = true })
+  T.eq(head.highlights[1].group, "VimnotateMode", "badge drawn with VimnotateMode")
+  T.eq(head.highlights[2].group, "WinBar", "rest of the row falls back to the remapped WinBar")
+  vim.o.background = "light"
+  local light = vim.api.nvim_get_hl(0, { name = "VimnotateWinbar" }).bg
+  T.ok(light ~= bar.bg, "switching to a light background re-tints the bar")
+  vim.cmd("hi clear")
+  vim.cmd("doautocmd ColorScheme")
+  T.eq(vim.api.nvim_get_hl(0, { name = "VimnotateWinbar" }).bg, light, "a colorscheme reload restores it")
+  vim.wo[tw].winhighlight = "Normal:ErrorMsg,WinBar:Search"
+  require("vimnotate.core").scrub_win(tw)
+  T.eq(vim.wo[tw].winhighlight, "Normal:ErrorMsg,WinBar:VimnotateWinbar,WinBarNC:VimnotateWinbar", "other window highlights are kept")
+  T.finish("Cancel")
+end
+
+function C.mode_cue_override(V)
+  T.eq(vim.api.nvim_get_hl(0, { name = "VimnotateMode" }).bg, 0x123456, "a user's own badge colour survives")
+  vim.cmd("doautocmd ColorScheme")
+  vim.o.background = "light"
+  T.eq(vim.api.nvim_get_hl(0, { name = "VimnotateMode" }).bg, 0x123456, "and survives a reload and a background change")
+  T.finish("Cancel")
+end
+
 function C.note_marker(V)
   local wb = function()
     return vim.wo[V.thread_win()].winbar

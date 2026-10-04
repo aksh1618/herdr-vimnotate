@@ -1,5 +1,15 @@
 local Hl = {}
 
+local owned = {}
+
+local function own(name, spec)
+  local cur = vim.api.nvim_get_hl(0, { name = name })
+  if next(cur) == nil or vim.deep_equal(cur, owned[name]) then
+    vim.api.nvim_set_hl(0, name, spec)
+    owned[name] = vim.api.nvim_get_hl(0, { name = name })
+  end
+end
+
 local function define_highlights()
   vim.api.nvim_set_hl(0, "VimnotateComment", { bg = "#5f5f00", ctermbg = 58 })
   vim.api.nvim_set_hl(0, "VimnotateGood", { bg = "#005f00", ctermbg = 22 })
@@ -30,12 +40,20 @@ local function define_highlights()
   end
   vim.api.nvim_set_hl(0, "VimnotateEdge", { fg = "#626262", ctermfg = 241 })
   vim.api.nvim_set_hl(0, "VimnotateLabel", { fg = "#8a8a8a", ctermfg = 245, italic = true, cterm = { italic = true } })
-  vim.api.nvim_set_hl(0, "VimnotateWinbarNote", { fg = "#d7d700", ctermfg = 184, bold = true, cterm = { bold = true } })
+  local light = vim.o.background == "light"
+  vim.api.nvim_set_hl(0, "VimnotateWinbarNote", { fg = light and "#5f5f00" or "#d7d700", ctermfg = light and 58 or 184, bold = true, cterm = { bold = true } })
+  own("VimnotateMode", { fg = "#1c1c1c", bg = "#ffc340", ctermfg = 234, ctermbg = 214, bold = true, cterm = { bold = true } })
+  own("VimnotateWinbar", light
+    and { fg = "#4a3c1e", bg = "#f2e6c9", ctermfg = 237, ctermbg = 223 }
+    or { fg = "#d6cbb0", bg = "#2b2620", ctermfg = 251, ctermbg = 235 })
+  own("VimnotateMsgArea", { link = "VimnotateWinbar" })
+  vim.api.nvim_set_hl(0, "MsgArea", { link = "VimnotateMsgArea" })
 end
 
 function Hl.setup()
   define_highlights()
   vim.api.nvim_create_autocmd("ColorScheme", { callback = define_highlights })
+  vim.api.nvim_create_autocmd("OptionSet", { pattern = "background", callback = define_highlights })
 end
 
 Hl.define_highlights = define_highlights

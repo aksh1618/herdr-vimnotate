@@ -73,6 +73,7 @@ vn ops.txt "" compose_highlight
 SELECTED="$fx/sel.txt" vn ops.txt "" anchor_highlight
 vn ops.txt "" hover_sent
 vn ops.txt "" no_repeat_provider
+vn ops.txt "" q_guard
 vn ops.txt "" note_toggle
 check '[ "$(cat "$work/reply.md")" = "$(printf "line one\nline two!\n\n> line five\n\nLooks good.")" ]' "note sent first, with the popup open"
 vn ops.txt "" note_empty

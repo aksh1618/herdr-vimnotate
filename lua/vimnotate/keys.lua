@@ -70,7 +70,7 @@ function K.setup()
   end
   vim.keymap.set("n", "e", M.edit, bo)
   vim.keymap.set("n", "x", M.remove_at_cursor, bo)
-  vim.keymap.set("n", "q", "<Cmd>qa<CR>", bo)
+  vim.keymap.set("n", "q", M.send_key, bo)
   vim.keymap.set("n", "<Tab>", M.note_toggle, bo)
   vim.keymap.set("n", "<S-Tab>", M.rail_focus, bo)
   vim.keymap.set("n", "R", M.cycle_view, bo)

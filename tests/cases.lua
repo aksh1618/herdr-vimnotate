@@ -414,6 +414,37 @@ local function title_of(cfg)
   return t
 end
 
+function C.q_guard(V)
+  T.cursor(0)
+  T.keys("cc<Esc>q")
+  T.eq({ vim.api.nvim_get_current_win(), V.q_guarded() }, { V.thread_win(), true }, "cancelling the compose popup arms the guard")
+  T.keys("q")
+  T.ok(vim.wo[V.thread_win()].winbar:find("q sends", 1, true) ~= nil, "a q right after it flashes instead of sending")
+  vim.wait(450)
+  T.ok(not V.q_guarded(), "the guard lapses")
+  T.keys("<Tab>x<Esc>q")
+  T.ok(V.q_guarded(), "hiding the note arms it too")
+  vim.wait(450)
+  T.keys("jk")
+  T.ok(not V.q_guarded(), "moving in the thread does not arm it")
+  local exits = 0
+  local real = vim.cmd
+  vim.cmd = setmetatable({}, {
+    __call = function(_, c)
+      if c == "qa" then
+        exits = exits + 1
+        return
+      end
+      return real(c)
+    end,
+    __index = real,
+  })
+  T.keys("q")
+  vim.cmd = real
+  T.eq(exits, 1, "a later q sends")
+  T.finish("Cancel")
+end
+
 function C.note_toggle(V, A)
   T.cursor(0)
   T.keys("<Tab>line one<CR>line two<Esc>")

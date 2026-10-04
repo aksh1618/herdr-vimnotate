@@ -28,6 +28,7 @@ local RAIL_MIN_THREAD = 80
 local RAIL_FORCE_MIN_THREAD = 40
 local INLINE_INDENT = 2
 local FLASH_MS = 2500
+local Q_GUARD_MS = 400
 local inline_ns = vim.api.nvim_create_namespace("vimnotate.inline")
 local inline_boxes = {}
 
@@ -271,6 +272,23 @@ local function flash(text)
 end
 M.flash = flash
 
+local function now_ms()
+  return vim.uv.hrtime() / 1e6
+end
+
+local function q_guarded()
+  return view.returned_at ~= nil and now_ms() - view.returned_at < Q_GUARD_MS
+end
+M.q_guarded = q_guarded
+
+function M.send_key()
+  if q_guarded() then
+    flash("q sends")
+    return
+  end
+  vim.cmd("qa")
+end
+
 function M.cycle_view()
   local tw = thread_win()
   if tw == -1 then
@@ -309,6 +327,22 @@ local resize_pending = false
 
 function Vw.setup()
   local view_group = vim.api.nvim_create_augroup("vimnotate.view", { clear = true })
+  local left_win
+  vim.api.nvim_create_autocmd("WinLeave", {
+    group = view_group,
+    callback = function()
+      left_win = vim.api.nvim_get_current_win()
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinEnter", {
+    group = view_group,
+    callback = function()
+      local win = vim.api.nvim_get_current_win()
+      if vim.api.nvim_win_get_buf(win) == thread and left_win and left_win ~= win then
+        view.returned_at = now_ms()
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
     group = view_group,
     callback = function()

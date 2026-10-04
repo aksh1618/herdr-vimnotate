@@ -72,7 +72,7 @@ In the thread, with the default operator keys (see [Configuration](#configuratio
 | `R` | Cycle the view: inline boxes → side rail → off. |
 | `<S-Tab>` | Focus the side rail. |
 | `<Tab>` | Open the general note, a popup whose text is sent above the annotations. |
-| `q` | Send and quit. |
+| `q` | Send and quit. For 400 ms after you come back to the thread from a popup or the rail (by key or by click), `q` doesn't send and the winbar shows `q sends` instead, so the `q` that closed a popup can't send by a double tap. `:Send` and `:qa` always send. |
 
 - Operators add a new annotation, even over an existing one; `e` is how you edit. The exceptions are on exactly an existing annotation's range:
   - `d` or `p` where one of the same kind is already there adds nothing; a [restored](#what-gets-sent) one becomes pending again.

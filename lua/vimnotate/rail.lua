@@ -98,7 +98,10 @@ end
 local function anchor_y(tw, top, skip, srow, scol)
   local vcol = 0
   if scol > 0 then
-    vcol = dw((vim.api.nvim_buf_get_lines(thread, srow, srow + 1, false)[1] or ""):sub(1, scol))
+    local prefix = (vim.api.nvim_buf_get_lines(thread, srow, srow + 1, false)[1] or ""):sub(1, scol)
+    vcol = vim.api.nvim_win_call(tw, function()
+      return dw(prefix)
+    end)
   end
   if srow > top or (srow == top and vcol >= skip) then
     return vim.api.nvim_win_text_height(tw, { start_row = top, start_vcol = skip, end_row = srow, end_vcol = vcol + 1 }).all - 1

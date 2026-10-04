@@ -109,6 +109,7 @@ vn ops.txt "" compose_box_fit
 vn ops.txt "" compose_fit_edges
 vn ops.txt "" compose_others_stable
 vn ops.txt "" compose_title_hints
+vn wrap.txt "" rail_anchor_wrap
 vn ops.txt "" box_control_chars
 vn ops.txt "" wrap_matches_nvim
 vn ops.txt "" mouse_scrolloff_bar

@@ -1531,6 +1531,33 @@ function C.compose_others_stable(V)
   vim.defer_fn(nxt, 300)
 end
 
+function C.rail_anchor_wrap(V)
+  local item = T.addchar(1, 50, 51, "comment", "x")
+  V.view.setting = "rail"
+  V.apply_view()
+  local tw = V.thread_win()
+  local function y()
+    V.rail_render()
+    for _, b in ipairs(V.view.bubbles) do
+      if b.item == item then
+        return b.y0
+      end
+    end
+  end
+  T.eq(V.view.mode, "rail", "rail view")
+  vim.api.nvim_set_current_win(tw)
+  local from_thread = y()
+  T.ok(from_thread ~= nil, "bubble rendered")
+  local buf = vim.api.nvim_create_buf(false, true)
+  local w = vim.api.nvim_open_win(buf, true, { relative = "editor", row = 0, col = 0, width = 30, height = 3 })
+  vim.wo[w].linebreak = true
+  T.eq(y(), from_thread, "rail anchor measured in the thread, whatever window is current")
+  vim.api.nvim_win_close(w, true)
+  vim.api.nvim_set_current_win(tw)
+  T.eq(vim.fn.getwininfo(tw)[1].width, 51, "x sits in the thread's last column")
+  T.finish("Cancel")
+end
+
 function C.box_control_chars()
   local boxes = require("vimnotate.boxes")
   local rows = boxes.bubble({ kind = "comment", id = "anno_00000", body = "a\1b and\127c" }, 40, "VimnotateEdge", true)

@@ -11,7 +11,7 @@ herdr has no pane-local placement. `popup` is centred over everything, `overlay`
 3. `pane move` it into the target's tab, split below the target, focused.
 4. `pane move` the *target* out into its own tab, labelled `<tab> [parked by vimnotate]`, and rename the target's tab `vimnotate: <tab>`.
 
-**Tab names.** herdr's `tab rename` always sets a fixed label, and nothing clears one, so a tab herdr names by its position can't be handed back to automatic naming. A tab whose label equals its position in `tab list` is treated as automatic and isn't renamed, since restoring the position would freeze it and go stale once tabs move or close. (`tab get`'s `number` is a stable id, not the position.) A labelled tab is renamed only if its label is still the one captured at open, and gets it back on exit unless the user renamed it during the review.
+**Tab names.** herdr's `tab rename` always sets a fixed label, and nothing clears one, so a tab herdr names by its position can't be handed back to automatic naming. A tab whose label equals its position in `tab list` is treated as automatic and isn't renamed, since restoring the position would freeze it and go stale once tabs move or close. (`tab get`'s `number` is a stable id, not the position.) A labelled tab is renamed only if its label is still the one captured at open, and gets it back on exit unless the user renamed it during the review. A tab with an empty label becomes `vimnotate`, and its parked tab `[parked by vimnotate]`.
 
 The vimnotate pane is now the only pane in that slot, at the target's dimensions. On exit the target is moved back in beside it and the vimnotate pane closes, leaving the target in its old slot. Pane ids, processes, scrollback and labels all survive; nothing is recreated.
 
@@ -32,6 +32,30 @@ Both of these work around herdr 0.9 behaviour. If a later herdr re-applies geome
 The thread is a **normal, non-modifiable buffer**, not a terminal buffer, with the pane's ANSI parsed into extmark highlights by hand. A terminal buffer looked like the obvious host and is the wrong one: it pre-maps the mouse and cancels visual mode on `nvim_set_current_win`, which kills the selection gesture this plugin is built around.
 
 Annotations are extmarks on that buffer, so they move with the text: the highlights are `hl_group` ranges, the inline boxes are `virt_lines`, and the compose popup opens over blank virtual lines reserved where the box will land, so it never covers the thread and saving it doesn't make anything jump.
+
+## Keys
+
+An operator key is valid when it is one printable ASCII character other than a space, the three keys differ, and none is already a thread key (`x`, `e`, `K`, `u`, `q`, `R`, `H`, `L`, `g`, `v`, `V`, `.`, `:`, a digit, or `]`/`[`). If any isn't, all three fall back to `c`, `d` and `p`, and the winbar says why. `config.awk` passes any quoted key through and nvim does the check, since the list of thread keys lives in Lua.
+
+`a` and `i` work as operator keys, but they also start text objects (`ap`, `iw`, and any a config adds, such as `af`), so they stay text objects after another operator and in visual mode:
+
+- Taking `a` as the example, `a{motion}` works as usual, and the line form is `aaa` (`a` then `aa`, as `ap` is `a` then `ap`) or `a_`. Counts work: `3aaa`.
+- `a` isn't mapped in visual mode, so use the action bar there: its label for that operator shows no key.
+- Your own `a`/`i` text objects are never deleted as [ambiguous maps](../README.md#does-it-edit-my-neovim-config).
+
+**The `q` guard.** For 400 ms after you come back to the thread from a popup or the rail (by key or by click), `q` doesn't send and the winbar shows `q sends` instead, so the `q` that closed a popup can't send on a double tap. `:Send` and `:qa` always send.
+
+## Colours
+
+The winbar starts with an amber `VIMNOTATE` badge and has a warm, muted tint. The bottom row gets the same tint only when `cmdheight` is above 0; with `cmdheight=0` there is no bottom row. The thread window's `winhighlight` maps `WinBar` to `VimnotateWinbar`, and `MsgArea` links to `VimnotateMsgArea`. The colours are picked for `background=dark` or `light`, and re-picked when it changes:
+
+| Group | What it colours | Dark | Light | cterm |
+| --- | --- | --- | --- | --- |
+| `VimnotateMode` | The badge, bold. | `#1c1c1c` on `#ffc340` | the same | 214 |
+| `VimnotateWinbar` | The rest of the top row, over the thread and the side rail. | `#d6cbb0` on `#2b2620` | `#4a3c1e` on `#f2e6c9` | 251 on 235, 237 on 223 |
+| `VimnotateMsgArea` | The bottom row, when `cmdheight` is above 0. | links to `VimnotateWinbar` | | |
+
+A group that something else has already set is left alone, so your own definition wins; if your colorscheme loads after vimnotate, set it in a `ColorScheme` autocmd. To leave the bottom row untinted, link `VimnotateMsgArea` to `Normal`: an empty `{}` group counts as unset and is filled in again. A keymap warning on the winbar uses the colorscheme's `WarningMsg`.
 
 ## The clipboard anchor
 

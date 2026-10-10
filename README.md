@@ -1,13 +1,13 @@
 # herdr-vimnotate
 
-[![vimnotate reviewing a Claude Code reply: p marks paragraphs as looking good, d deletes one, c comments on another, q sends the review to the agent's composer](docs/vimnotate-demo.webp)](https://github.com/user-attachments/assets/83c63ee7-5f94-4757-9a08-98532e6a04fd)
+[![vimnotate reviewing a Claude Code reply: p marks paragraphs as looking good, d deletes one, c comments on another, q sends the review to the agent's composer](docs/vimnotate-demo.webp)](https://github.com/user-attachments/assets/6ffeb5cf-e4a9-4b0c-bb55-fe7a231a98a9)
 
 Press `prefix+a` to switch to annotation mode for the focused Herdr pane, using neovim under the hood. You can review and annotate an agent's reply with vim motions for three operations (the keys are [configurable](#configuration)):
 1. `c` is comment
 2. `d` is delete (remove this)
 3. `p` is plus (looks good)
 
-So, with the default keys, `cap` comments on a paragraph, `dap` marks one for deletion, `pp` says a line looks good, `.` repeats the last one.
+So, for example, `cap` comments on a paragraph, `dap` marks one for deletion, `pp` says a line looks good, `.` repeats the last one.
 
 Once you're done, press `q` to send the whole review back as one message, sitting unsubmitted in the agent's composer.
 
@@ -45,7 +45,7 @@ The manifest lists macOS and the scripts avoid GNU-only tools, but it has only b
 ## Flow
 
 1. `prefix+a`. The thread opens in place, scrolled to the bottom, in a read-only buffer.
-2. Navigate like neovim; Annotate with the c/d/p operators (the default keys; more operators below). Or just use your mouse.
+2. Navigate like neovim; Annotate with the c/d/p operators (more operators below). Or just use your mouse.
 3. Each annotation is a coloured highlight over its range plus a box under it with your comment (or, with `R`, a bubble in a side rail).
 4. `q` (or `:qa`, or `:Send`) once you're done.
 5. The target pane comes back and the review is pasted into its composer **unsubmitted**, so you read it back and press Enter yourself.
@@ -53,11 +53,11 @@ The manifest lists macOS and the scripts avoid GNU-only tools, but it has only b
 
 Already selected something in herdr's copy mode? Press `prefix+a` with the selection still active and vimnotate opens with the comment popup on that text. If it can't find the text in the thread, it quotes it into the general note instead.
 
-Selected it with the mouse instead? herdr copies a mouse selection to the clipboard (with its default `ui.copy_on_select = true`), and the prefix key clears the selection itself, so with no copy-mode selection vimnotate reads the clipboard and anchors the comment popup on that text, but only if it's in this pane's thread and has at least 8 non-blank characters. Anything else on the clipboard is ignored, never quoted into the note. The same clipboard text anchors only one review; copy something else, or use copy mode, to anchor on it again.
+Selected it with the mouse instead? herdr copies it to the clipboard, so `prefix+a` opens the comment popup on that text too, as long as it's in the thread ([how](docs/how-it-works.md#the-clipboard-anchor)).
 
 ## Keymap
 
-In the thread, with the default operator keys (see [Configuration](#configuration) to change `c`, `d` and `p`):
+In the thread:
 
 | Key | What it does |
 | --- | --- |
@@ -72,8 +72,9 @@ In the thread, with the default operator keys (see [Configuration](#configuratio
 | `R` | Cycle the view: inline boxes → side rail → off. |
 | `<S-Tab>` | Focus the side rail. |
 | `<Tab>` | Open the general note, a popup whose text is sent above the annotations. |
-| `q` | Send and quit. For 400 ms after you come back to the thread from a popup or the rail (by key or by click), `q` doesn't send and the winbar shows `q sends` instead, so the `q` that closed a popup can't send by a double tap. `:Send` and `:qa` always send. |
+| `q` | Send and quit. |
 
+- The `c`, `d` and `p` keys can be changed in [Configuration](#configuration).
 - Operators add a new annotation, even over an existing one; `e` is how you edit. The exceptions are on exactly an existing annotation's range:
   - `d` or `p` where one of the same kind is already there adds nothing; a [restored](#what-gets-sent) one becomes pending again.
   - `d`, `p` or `c` on a restored annotation of another kind changes its kind and makes it pending again; `c` opens the compose popup on it.
@@ -82,7 +83,7 @@ In the thread, with the default operator keys (see [Configuration](#configuratio
 - The comment compose popup is an ordinary vim buffer: `Enter` saves (in insert or normal mode), `Ctrl-j` inserts a new line, `Esc` goes to normal mode and `q` there cancels.
 - The note popup is a plain buffer too, but `Enter` is just a newline. `q` or `Tab` in normal mode hides it, and so does clicking back into the thread. Hiding never discards the note; only `:Cancel` does.
 - In the side rail: `j`/`k` move between annotations, `Enter` jumps to one in the thread, `e` edits, `x` removes, `Esc` or `Tab` goes back to the thread.
-- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels, each with its key. Resting the cursor on an annotation shows a hint bar for `e` and `x`, plus `K` when the view isn't already showing that annotation's whole box.
+- A visual selection (keyboard or mouse drag) shows an action bar with clickable "looks good", "comment" and "delete" labels. Resting the cursor on an annotation shows a hint bar for `e`, `x` and `K`.
 
 ## What gets sent
 
@@ -144,34 +145,9 @@ looks_good = "p"
 ```
 
 - It's read each time vimnotate opens, so changes apply to the next review without restarting herdr. A review that's already open keeps the settings it started with.
-- Only `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments. The operator keys go under a `[keys]` header (or as `keys.comment = "c"` and so on above any header); other tables and inline tables (`keys = { comment = "c" }`) are ignored.
+- Only `key = value` lines are understood: strings in double quotes, `true`/`false`, whole numbers and `#` comments.
 - Unknown keys/values are ignored.
-- An operator key is one printable ASCII character other than a space, in double quotes. If one isn't, if two are the same, or if one is already a thread key (`x`, `e`, `K`, `u`, `q`, `R`, `H`, `L`, `g`, `v`, `V`, `.`, `:`, a digit, or `]`/`[`), all three fall back to `c`, `d` and `p`, and the thread's top bar says why.
-- `a` and `i` work as operator keys, but they also start text objects (`ap`, `iw`, and any your config adds, such as `af`), so they stay text objects after another operator and in visual mode:
-  - Taking `a` as the example, `a{motion}` works as usual, and the line form is `aaa` (`a` then `aa`, as `ap` is `a` then `ap`) or `a_`. Counts work: `3aaa`.
-  - `a` isn't mapped in visual mode, so use the action bar there: its label for that operator shows no key.
-  - Your own `a`/`i` text objects are never deleted as [ambiguous maps](#does-it-edit-my-neovim-config).
-
-### Colours
-
-The thread looks like the pane it replaced, so vimnotate marks the switch the way a statusline marks a vim mode: the top row (the winbar) starts with an amber `VIMNOTATE` badge and has a warm, muted tint. The bottom row gets the same tint only when your config has one, that is with `cmdheight` above 0 (with `cmdheight=0` there is no bottom row, and nothing is added). These are highlight groups, picked for `background=dark` or `light` (and re-picked when it changes), with cterm fallbacks:
-
-| Group | What it colours | Dark | Light |
-| --- | --- | --- | --- |
-| `VimnotateMode` | The `VIMNOTATE` badge, bold. | `#1c1c1c` on `#ffc340` | the same |
-| `VimnotateWinbar` | The rest of the top row, over the thread and the side rail. | `#d6cbb0` on `#2b2620` | `#4a3c1e` on `#f2e6c9` |
-| `VimnotateMsgArea` | The bottom row (`MsgArea`), when `cmdheight` is above 0. | links to `VimnotateWinbar` | |
-
-The badge is an orange-leaning amber so it doesn't read as the comment yellow (`#d7d700`, also used by the `✎ note` marker, which turns olive `#5f5f00` on a light background), and the rest of the bar stays a muted warm grey rather than yellow so the note marker keeps its contrast. A keymap warning on the bar uses your colorscheme's `WarningMsg`, so its contrast depends on that. The cterm fallbacks are 214 for the badge, 251 on 235 (dark) and 237 on 223 (light) for the bar.
-
-vimnotate leaves a group alone once something else has set it, so set your own in your neovim config, or in a `ColorScheme` autocmd if a colorscheme loads after it:
-
-```lua
-vim.api.nvim_set_hl(0, "VimnotateMode", { fg = "#1a1b26", bg = "#7aa2f7", bold = true })
-vim.api.nvim_set_hl(0, "VimnotateMsgArea", { link = "Normal" })
-```
-
-Linking `VimnotateMsgArea` to `Normal` leaves the bottom row untinted. Use a link rather than `{}`: an empty group counts as unset, so vimnotate fills it in again.
+- An operator key is one character that isn't already a key used by vimnotate. See [how it works](docs/how-it-works.md#keys) for the exact rules.
 
 ## FAQ
 
@@ -181,7 +157,7 @@ How the pane's slot is taken and given back, how the thread is rendered, how the
 
 ### Where did my agent pane go?
 
-While you annotate, the agent pane is parked in a tab of its own, named `<tab> [parked by vimnotate]`, and the tab you're annotating in is renamed `vimnotate: <tab>`. If you navigate away and click the agent to come back, you land in the parked tab; your annotations are in the `vimnotate:` tab. When vimnotate exits the parked tab closes and your tab gets its name back, unless you renamed it yourself meanwhile. A tab herdr names automatically (by its position) is left unrenamed, because herdr has no way to hand a renamed tab back to automatic naming; its parked tab still says `<position> [parked by vimnotate]`. A tab with an empty label becomes `vimnotate` and its parked tab `[parked by vimnotate]`.
+While you annotate, the agent pane is parked in a tab of its own, named `<tab> [parked by vimnotate]`, and the tab you're annotating in is renamed `vimnotate: <tab>`. If you navigate away and click the agent to come back, you land in the parked tab; your annotations are in the `vimnotate:` tab. When vimnotate exits the parked tab closes and your tab gets its name back (unless you renamed it yourself while vimnotate was still running).
 
 ### Does it share anything with my everyday neovim?
 
@@ -191,7 +167,10 @@ vimnotate loads your neovim config, but a review session keeps neovim's own stat
 - `undofile` is off, so review text never lands in your undo directory. Swap files are off too.
 - The clipboard is shared. If your config sets `clipboard=unnamedplus`, yanks in a review reach the system clipboard, and pasting in a popup reads from it.
 - Anything a plugin in your config keeps outside ShaDa (its own history or session files, say) behaves as in any other neovim; vimnotate doesn't isolate it.
-- The capture lives in a `mktemp -d` directory that is removed on exit. The only things kept are the [restore](#what-gets-sent) state and, after clipboard text anchors a review, a hash of that text (so it anchors only once), except when a send fails and there's no clipboard tool: then the whole directory, captures included, is kept so the review isn't lost, and the notification gives the review's path.
+- The capture lives in a `mktemp -d` directory that is removed on exit. Only these are kept:
+  - the [restore](#what-gets-sent) state;
+  - a hash of clipboard text that anchored a review, so it anchors only once;
+  - the whole directory, captures included, when a send fails and there's no clipboard tool, so the review isn't lost.
 
 ### Does it edit my neovim config?
 
@@ -200,10 +179,18 @@ No. The plugin needs to override some neovim config to work well, but only insid
 - Global maps that would make its keys ambiguous are deleted for the length of the session. A global `cs` (surround plugins) or `]ab` makes `c` or `]a` wait out `timeoutlen` before deciding, and a buffer-local exact match does *not* escape that wait. They're re-checked after every lazy.nvim `LazyLoad`, since a lazy-loaded plugin can map them later.
 - Global left-mouse maps are deleted and `mouse=a` is forced, since the drag-select gesture needs the mouse.
 - `lualine` is hidden if present, and `laststatus=0` is kept.
-- The thread window's `winhighlight` maps `WinBar` to `VimnotateWinbar`, and `MsgArea` links to `VimnotateMsgArea` (see [Colours](#colours)).
+- The thread window's `winhighlight` maps `WinBar` to `VimnotateWinbar`, and `MsgArea` links to `VimnotateMsgArea` (see [Can I change the colours?](#can-i-change-the-colours)).
 - The compose and note popups are `filetype=markdown`, which pulls in whatever markdown stack is loaded. It's pre-warmed on a throwaway buffer so it doesn't load inside the first keypress.
 - The compose popup turns off `breakindent` and `showbreak` and uses your global `tabstop`, overriding those settings from a markdown ftplugin. In the inline view, this makes its text wrap like the box it turns into. Tabs at or after a wrap boundary can still produce different spacing or wrapping.
 - The empty-composer check is a heuristic that recognises the composer shapes of Claude Code, pi and Codex: a single line between the last two coloured horizontal rules with only coloured text below them (Claude Code, pi), or a `›` prompt at the start of a line through its shaded block (Codex). It's empty when that holds nothing but faint text and Claude Code's leading `❯` or Codex's `›`. Other agents, and anything it isn't sure of, get a leading blank line above the annotations (a space before a one-line review).
+
+### Can I change the colours?
+
+The top bar's badge and tint are the highlight groups `VimnotateMode` and `VimnotateWinbar`, and `VimnotateMsgArea` tints the bottom row when `cmdheight` is above 0. vimnotate doesn't override a group that's already set, so set yours in your neovim config ([defaults and details](docs/how-it-works.md#colours)):
+
+```lua
+vim.api.nvim_set_hl(0, "VimnotateMode", { fg = "#1a1b26", bg = "#7aa2f7", bold = true })
+```
 
 ## License
 
